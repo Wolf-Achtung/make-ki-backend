@@ -8,48 +8,79 @@ CORS(app)
 
 @app.route("/")
 def index():
-    return "✅ KI-Backend aktiv – Dummy-Modus + PDFMonkey bereit."
+    return "✅ KI-Backend aktiv – GPT-Dummy & PDFMonkey einsatzbereit."
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
     data = request.json
-    print("📥 Formular-Daten erhalten:", data)
+    print("Fragebogen empfangen:", data)
 
-    # Dummy-Antwort für Testphase
+    # Dummy-GPT-Antwort strukturieren (real später durch GPT ersetzt)
     result = {
-        "unternehmen": data.get("unternehmen", "Demo GmbH"),
-        "score": 82,
-        "status": "fortgeschritten",
-        "analyse": "Sie sind bereits gut aufgestellt, aber es gibt Optimierungspotenzial.",
+        "name": data.get("name", "Max Mustermann"),
+        "email": data.get("email"),
+        "unternehmen": data.get("unternehmen", "Muster GmbH"),
+        "datum": data.get("datum"),
+        "score": 85,
+        "status": "aktiv",
         "bewertung": "gut",
-        "empfehlungen": [
-            {"kategorie": "Transparenz", "text": "Führen Sie eine Modellkarte ein."},
-            {"kategorie": "Schulung", "text": "Mitarbeitende sollten KI-Richtlinien kennen."}
+        "executive_summary": "Dieses KI-Briefing zeigt die wichtigsten Chancen und Risiken...",
+        "analyse": "Die Muster GmbH befindet sich in einem dynamischen Marktumfeld...",
+        "emp": [
+            {
+                "titel": "Dringende Hebelmaßnahme",
+                "beschreibung": "Automatisierung interner Workflows mit Make starten.",
+                "next_step": "Pilot-Workflow identifizieren und aufsetzen.",
+                "tool": "Make"
+            },
+            {
+                "titel": "Potenzial entfesseln",
+                "beschreibung": "Content-Erstellung durch Notion AI und DeepL Pro unterstützen.",
+                "next_step": "Redaktionsprozesse analysieren und KI integrieren.",
+                "tool": "Notion AI, DeepL Pro"
+            },
+            {
+                "titel": "Zukunft sichern",
+                "beschreibung": "Strategische Weiterbildung im Bereich KI für Schlüsselmitarbeiter.",
+                "next_step": "Online-Kurse bei aiCampus starten.",
+                "tool": "aiCampus"
+            }
         ],
-        "gamechanger": {
-            "titel": "KI-gestützter Mitarbeiter-Coach",
-            "warum": "hilft bei Onboarding und Weiterbildung",
-            "nutzen": "schnellere Einarbeitung",
-            "potenzial": "hoch"
+        "roadmap": {
+            "kurzfristig": "Mindestens einen Prozess automatisieren.",
+            "mittelfristig": "KI-Standards im Unternehmen definieren.",
+            "langfristig": "KI als festen Bestandteil der Unternehmenskultur etablieren."
         },
-        "trendreport": "Personalisierte KI-Assistenz wird zum Standard.",
-        "zukunft": "In 5 Jahren ist KI Teil jeder Arbeitsbeschreibung.",
-        "visionaer": "Nutzen Sie KI zur Identifikation neuer Geschäftsmodelle."
+        "ressourcen": "Plattformen wie aiCampus, Bundesförderprogramme...",
+        "zukunft": "Mit einem klaren KI-Fahrplan kann die Muster GmbH zum Branchenvorbild werden...",
+        "risikoprofil": {
+            "risikoklasse": "Moderat",
+            "begruendung": "Nutzung generativer Tools mit sensiblen Daten.",
+            "pflichten": ["Transparenzpflichten", "DSFA", "Mitarbeiterschulung"]
+        },
+        "tooltipps": [
+            {"name": "Make", "einsatz": "Workflow-Automatisierung", "warum": "Intuitiv und vielseitig"},
+            {"name": "Notion AI", "einsatz": "Content-Optimierung", "warum": "Smarte Textvorschläge"}
+        ],
+        "foerdertipps": [
+            {"programm": "go-digital", "zielgruppe": "KMU", "nutzen": "Bis zu 50% Förderung"}
+        ],
+        "branchenvergleich": "Die IT-Branche liegt beim KI-Einsatz vorn...",
+        "trendreport": "Multimodale Systeme & datensichere Private-AI-Lösungen kommen.",
+        "visionaer": "Ihre Agentur schafft doppelt so viel bei halbem Aufwand durch KI."
     }
 
     return jsonify(result)
 
 @app.route("/generate-pdf", methods=["POST"])
 def generate_pdf():
-    print("📥 PDF-Anfrage erhalten")
-    data = request.json or {}
-    print("📦 Daten für PDFMonkey:", data)
+    data = request.json
+    print("PDF-Daten empfangen:", data)
 
     api_key = os.environ.get("PDFMONKEY_API_KEY")
     template_id = os.environ.get("PDFMONKEY_TEMPLATE_ID")
 
     if not api_key or not template_id:
-        print("❌ API-Key oder Template-ID fehlen")
         return jsonify({"error": "PDFMonkey-Konfiguration fehlt"}), 500
 
     try:
@@ -66,15 +97,16 @@ def generate_pdf():
                 }
             }
         )
-        print("📤 Antwort von PDFMonkey:", response.status_code, response.text)
+
         if response.status_code != 201:
+            print("❌ PDFMonkey-Fehler:", response.text)
             return jsonify({"error": "PDF konnte nicht erstellt werden"}), 500
 
         pdf_url = response.json().get("document", {}).get("download_url")
         return jsonify({"pdf_url": pdf_url})
 
     except Exception as e:
-        print("❌ Fehler bei PDF-Erstellung:", e)
+        print("❌ Ausnahmefehler:", e)
         return jsonify({"error": "Serverfehler"}), 500
 
 if __name__ == "__main__":
