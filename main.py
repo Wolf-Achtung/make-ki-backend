@@ -15,7 +15,6 @@ def analyze():
     data = request.json
     print("Fragebogen empfangen:", data)
 
-    # Dummy-GPT-Antwort strukturieren (real später durch GPT ersetzt)
     result = {
         "name": data.get("name", "Max Mustermann"),
         "email": data.get("email"),
@@ -93,7 +92,8 @@ def generate_pdf():
             json={
                 "document": {
                     "document_template_id": template_id,
-                    "payload": data
+                    "payload": data,
+                    "publish": True
                 }
             }
         )
