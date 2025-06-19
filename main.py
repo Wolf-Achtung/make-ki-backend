@@ -15,21 +15,18 @@ def call_gpt(prompt, expect_json=False):
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "Du bist ein zertifizierter KI-Berater. Antworte strukturiert, aber klar verständlich. Antworte auf Deutsch."},
+                {"role": "system", "content": "Du bist ein zertifizierter KI-Berater. Antworte strukturiert, konkret und auf Deutsch."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7
         )
         content = response.choices[0].message.content.strip()
-        if expect_json:
-            return json.loads(content)
-        return content
-    except json.JSONDecodeError as e:
-        print("❌ JSON-Parsing-Fehler:", e)
-        return [] if 'empfehlungen' in prompt else {}
+        return json.loads(content) if expect_json else content
+    except json.JSONDecodeError:
+        return [] if expect_json else "Fehler beim Parsen der GPT-Antwort."
     except Exception as e:
         print("❌ GPT-Fehler:", e)
-        return "Fehler bei der GPT-Auswertung."
+        return [] if expect_json else "Fehler bei der GPT-Auswertung."
 
 def generate_gpt_analysis(data):
     score = int(data.get("score", 0))
@@ -39,17 +36,19 @@ def generate_gpt_analysis(data):
     herausforderung = data.get("herausforderung", "keine")
 
     prompts = {
-        "executive_summary": f"Erstelle eine kurze Executive Summary für ein Unternehmen der Branche {branche} mit dem Ziel: {ziel}. Der aktuelle KI-Check-Score beträgt {score}/40.",
-        "analyse": f"Analysiere, wie ein Unternehmen der Branche {branche} mit einem Score von {score} beim KI-Einsatz aktuell aufgestellt ist. Berücksichtige: Tools = {tools}, Herausforderung = {herausforderung}.",
-        "empfehlungen": f"Gib drei konkrete Empfehlungen (je mit Titel, Beschreibung, next_step, tool) für den KI-Einsatz in einem Unternehmen der Branche {branche} mit Score {score} und Ziel: {ziel}. Antworte im JSON-Format.",
-        "risikoprofil": f"Leite ein Risikoprofil ab (Score: {score}). Gib Risikoklasse, Begründung und 3 empfohlene Pflichten laut AI Act. Antworte im JSON-Format.",
-        "branchenvergleich": f"Wie schneidet ein Unternehmen der Branche {branche} mit Score {score} im Vergleich zum Branchendurchschnitt ab? Gib Bewertung, Abweichung und Einschätzung.",
-        "trendreport": f"Welche 3 relevanten KI-Trends betreffen aktuell besonders die Branche {branche}? Gib Titel und Beschreibung. Format: JSON.",
-        "toolkompass": f"Welche 3 konkreten Tools oder Plattformen könnten für das Ziel '{ziel}' in der Branche {branche} hilfreich sein? Beschreibe kurz Nutzen & Einsatzbereich. Format: JSON.",
-        "foerderung": f"Welche 2–3 aktuellen Förderprogramme auf EU- oder Bundesebene könnten für ein KMU mit Score {score} in der Branche {branche} relevant sein? Kurzbeschreibung + ggf. Link.",
-        "ressourcen": f"Empfiehl 3 hochwertige Ressourcen (Weiterbildung, Leitfäden oder Kurse) für Unternehmen der Branche {branche}, die sich mit KI beschäftigen wollen.",
-        "zukunft": f"Wie könnte sich der KI-Reifegrad dieses Unternehmens mit Ziel '{ziel}' in 12–24 Monaten weiterentwickeln – abhängig vom aktuellen Score {score}?",
-        "vision": f"Gib eine innovative, visionäre Idee (Gamechanger), wie ein Unternehmen der Branche {branche} KI auf neuartige Weise nutzen könnte."
+        "executive_summary": f"Fasse die KI-Situation eines Unternehmens der Branche {branche} mit dem Ziel '{ziel}' und Score {score}/40 zusammen.",
+        "analyse": f"Analysiere die aktuelle KI-Nutzung im Unternehmen ({branche}, Score {score}). Tools: {tools}, Herausforderung: {herausforderung}.",
+        "empfehlungen": f"Gib 3 Empfehlungen für den KI-Einsatz (JSON mit titel, beschreibung, next_step, tool). Ziel: {ziel}, Score: {score}, Branche: {branche}.",
+        "risikoprofil": f"Erstelle ein Risikoprofil inkl. risikoklasse, begruendung, pflichten (JSON) nach EU AI Act für Score {score}.",
+        "compliance": f"Welche DSGVO- und EU-AI-Act-Pflichten gelten für ein Unternehmen mit Score {score} in der Branche {branche}? Nenne konkrete Sanktionen.",
+        "branchenvergleich": f"Wie schneidet ein Unternehmen der Branche {branche} mit Score {score} im Branchendurchschnitt ab?",
+        "trendreport": f"Nenne 3 relevante KI-Trends für {branche} als JSON mit titel, beschreibung, link.",
+        "toolkompass": f"Empfiehl 3 Tools für Ziel '{ziel}' in der Branche {branche} als JSON mit titel, beschreibung, link.",
+        "foerderung": f"Nenne 2-3 passende Förderprogramme (EU/DE) für Score {score}, Branche {branche}.",
+        "ressourcen": f"Empfiehl 3 Ressourcen (Kurse, Leitfäden) für Einsteiger und Entscheider im Bereich KI für {branche}.",
+        "zukunft": f"Wie könnte sich das Unternehmen in 12–24 Monaten weiterentwickeln, wenn es gezielt in KI investiert?",
+        "vision": f"Gib eine visionäre Idee für KI-Nutzung in der Branche {branche}, die das Unternehmen transformieren könnte.",
+        "beratungsempfehlung": f"Warum sollte das Unternehmen ({branche}, Ziel: {ziel}, Score: {score}) jetzt ein Beratungsgespräch starten?"
     }
 
     result = {
@@ -66,13 +65,15 @@ def generate_gpt_analysis(data):
         "analyse": call_gpt(prompts["analyse"]),
         "empfehlungen": call_gpt(prompts["empfehlungen"], expect_json=True),
         "risikoprofil": call_gpt(prompts["risikoprofil"], expect_json=True),
+        "compliance": call_gpt(prompts["compliance"]),
         "branchenvergleich": call_gpt(prompts["branchenvergleich"]),
         "trendreport": call_gpt(prompts["trendreport"], expect_json=True),
         "toolkompass": call_gpt(prompts["toolkompass"], expect_json=True),
         "foerderung": call_gpt(prompts["foerderung"]),
         "ressourcen": call_gpt(prompts["ressourcen"]),
         "zukunft": call_gpt(prompts["zukunft"]),
-        "vision": call_gpt(prompts["vision"])
+        "vision": call_gpt(prompts["vision"]),
+        "beratungsempfehlung": call_gpt(prompts["beratungsempfehlung"])
     }
 
     return result
@@ -92,7 +93,7 @@ def generate_pdf():
     print("PDF-Daten empfangen:", data)
 
     api_key = os.environ.get("PDFMONKEY_API_KEY")
-    template_id = os.environ.get("PDFMONKEY_TEMPLATE_ID")
+template_id = os.environ.get("PDFMONKEY_TEMPLATE_ID_PREVIEW") if data.get("template_variant") == "preview" else os.environ.get("PDFMONKEY_TEMPLATE_ID")
 
     if not api_key or not template_id:
         return jsonify({"error": "PDFMonkey-Konfiguration fehlt"}), 500
