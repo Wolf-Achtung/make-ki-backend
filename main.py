@@ -3,13 +3,15 @@ from flask_cors import CORS
 import openai
 import os
 import json
+import requests
 from datetime import date
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
+# Initialisierung
 app = Flask(__name__)
 CORS(app)
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# GPT-Hilfsfunktion
 def call_gpt(prompt):
     response = openai.ChatCompletion.create(
         model="gpt-4o",
@@ -21,6 +23,7 @@ def call_gpt(prompt):
     )
     return response.choices[0].message.content.strip()
 
+# GPT-Auswertungsfunktion
 def generate_gpt_analysis(data):
     score = int(data.get("score", 0))
     branche = data.get("branche", "Allgemein")
@@ -69,15 +72,57 @@ def generate_gpt_analysis(data):
 
     return result
 
+# Index-Test
+@app.route("/")
+def index():
+    return "✅ KI-Backend aktiv – GPT & PDFMonkey bereit."
+
+# GPT-Hauptanalyse
 @app.route("/analyze", methods=["POST"])
 def analyze():
     data = request.json
     return jsonify(generate_gpt_analysis(data))
 
-@app.route("/gpt-analyze", methods=["POST"])
-def gpt_analyze():
+# PDF-Erzeugung
+@app.route("/generate-pdf", methods=["POST"])
+def generate_pdf():
     data = request.json
-    return jsonify(generate_gpt_analysis(data))
+    print("PDF-Daten empfangen:", data)
 
+    api_key = os.environ.get("PDFMONKEY_API_KEY")
+    template_id = os.environ.get("PDFMONKEY_TEMPLATE_ID")
+
+    if not api_key or not template_id:
+        return jsonify({"error": "PDFMonkey-Konfiguration fehlt"}), 500
+
+    try:
+        response = requests.post(
+            "https://api.pdfmonkey.io/api/v1/documents",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}"
+            },
+            json={
+                "document": {
+                    "document_template_id": template_id,
+                    "payload": data,
+                    "publish": True
+                }
+            }
+        )
+
+        if response.status_code != 201:
+            print("❌ PDFMonkey-Fehler:", response.text)
+            return jsonify({"error": "PDF konnte nicht erstellt werden"}), 500
+
+        pdf_url = response.json().get("document", {}).get("download_url")
+        return jsonify({"pdf_url": pdf_url})
+
+    except Exception as e:
+        print("❌ Ausnahmefehler:", e)
+        return jsonify({"error": "Serverfehler"}), 500
+
+# Startpunkt
 if __name__ == "__main__":
-    app.run(debug=True, port=5001)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
