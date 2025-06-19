@@ -11,21 +11,29 @@ app = Flask(__name__)
 CORS(app)
 client = OpenAI()
 
-# GPT-Hilfsfunktion
-
-def call_gpt(prompt):
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "Du bist ein zertifizierter KI-Berater. Antworte strukturiert und geschäftlich, aber klar verständlich."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.7
-    )
-    return response.choices[0].message.content.strip()
+# GPT-Hilfsfunktion mit JSON-Validierung
+def call_gpt(prompt, expect_json=False):
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "Du bist ein zertifizierter KI-Berater. Antworte strukturiert und geschäftlich, aber klar verständlich."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7
+        )
+        content = response.choices[0].message.content.strip()
+        if expect_json:
+            return json.loads(content)
+        return content
+    except json.JSONDecodeError as e:
+        print("❌ JSON-Parsing-Fehler:", e)
+        return [] if 'empfehlungen' in prompt else {}
+    except Exception as e:
+        print("❌ GPT-Fehler:", e)
+        return "Fehler bei der GPT-Auswertung."
 
 # GPT-Auswertungsfunktion
-
 def generate_gpt_analysis(data):
     score = int(data.get("score", 0))
     branche = data.get("branche", "Allgemein")
@@ -53,8 +61,8 @@ def generate_gpt_analysis(data):
 
     executive_summary = call_gpt(executive_prompt)
     analyse = call_gpt(analyse_prompt)
-    empfehlungen = json.loads(call_gpt(empfehlungen_prompt))
-    risikoprofil = json.loads(call_gpt(risikoprofil_prompt))
+    empfehlungen = call_gpt(empfehlungen_prompt, expect_json=True)
+    risikoprofil = call_gpt(risikoprofil_prompt, expect_json=True)
 
     result = {
         "name": data.get("name"),
