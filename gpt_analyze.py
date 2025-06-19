@@ -52,27 +52,16 @@ def generate_gpt_analysis(data):
     risikoprofil = json.loads(call_gpt(risikoprofil_prompt))
 
     result = {
-        "name": data.get("name"),
-        "email": data.get("email"),
-        "unternehmen": data.get("unternehmen"),
-        "datum": date.today().isoformat(),
-        "score": score,
-        "status": "in Prüfung" if score < 25 else "aktiv",
-        "bewertung": "kritisch" if score < 20 else "gut" if score > 30 else "ausbaufähig",
         "executive_summary": executive_summary,
         "analyse": analyse,
         "empfehlungen": empfehlungen,
         "risikoprofil": risikoprofil,
+        "score": score,
         "branche": branche,
         "ziel": ziel
     }
 
     return result
-
-@app.route("/analyze", methods=["POST"])
-def analyze():
-    data = request.json
-    return jsonify(generate_gpt_analysis(data))
 
 @app.route("/gpt-analyze", methods=["POST"])
 def gpt_analyze():
