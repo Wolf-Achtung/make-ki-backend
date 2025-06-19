@@ -93,7 +93,7 @@ def generate_pdf():
     print("PDF-Daten empfangen:", data)
 
     api_key = os.environ.get("PDFMONKEY_API_KEY")
-template_id = os.environ.get("PDFMONKEY_TEMPLATE_ID_PREVIEW") if data.get("template_variant") == "preview" else os.environ.get("PDFMONKEY_TEMPLATE_ID")
+    template_id = os.environ.get("PDFMONKEY_TEMPLATE_ID_PREVIEW") if data.get("template_variant") == "preview" else os.environ.get("PDFMONKEY_TEMPLATE_ID")
 
     if not api_key or not template_id:
         return jsonify({"error": "PDFMonkey-Konfiguration fehlt"}), 500
