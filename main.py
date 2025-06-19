@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import openai
+from openai import OpenAI
 import os
 import json
 import requests
@@ -9,11 +9,12 @@ from datetime import date
 # Initialisierung
 app = Flask(__name__)
 CORS(app)
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI()
 
 # GPT-Hilfsfunktion
+
 def call_gpt(prompt):
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
             {"role": "system", "content": "Du bist ein zertifizierter KI-Berater. Antworte strukturiert und geschäftlich, aber klar verständlich."},
@@ -24,6 +25,7 @@ def call_gpt(prompt):
     return response.choices[0].message.content.strip()
 
 # GPT-Auswertungsfunktion
+
 def generate_gpt_analysis(data):
     score = int(data.get("score", 0))
     branche = data.get("branche", "Allgemein")
