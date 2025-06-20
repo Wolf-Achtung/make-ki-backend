@@ -8,20 +8,10 @@ from typing import Optional
 
 app = FastAPI()
 
-# Final CORS setup: specific origins, no regex, no manual OPTIONS
-origins = [
-    "https://check.ki-sicherheit.jetzt",
-    "https://make.ki-sicherheit.jetzt",
-    "https://agent.ki-sicherheit.jetzt",
-    "https://ki-sicherheit.jetzt",
-    "https://ki-sicherheit.netlify.app",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000"
-]
-
+# Universelle CORS-Erlaubnis (nur für Tests empfohlen!)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origin_regex=".*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
