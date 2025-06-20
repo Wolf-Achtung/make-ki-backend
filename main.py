@@ -1,37 +1,82 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import os
-import requests
-from datetime import date
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Dict, Optional
+import uvicorn
 
-app = Flask(__name__)
-CORS(app)
+app = FastAPI()
 
-@app.route("/")
-def index():
-    return "✅ Backend aktiv – Dummy-Modus & PDFMonkey bereit."
+# CORS setup for Netlify frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.route("/analyze", methods=["POST"])
-def analyze():
-    data = request.json
-    print("Fragebogen empfangen:", data)
+# PDF template mapping (dummy IDs)
+PDFMONKEY_TEMPLATE_IDS = {
+    "preview": "TEMPLATE_ID_PREVIEW",
+    "full": "TEMPLATE_ID_FULL"
+}
 
-    today = date.today().isoformat()
+class FormData(BaseModel):
+    name: str
+    unternehmen: str
+    email: str
+    branche: str
+    selbststaendig: Optional[str]
+    branche_sonstige: Optional[str] = ""
+    r1: Optional[str]
+    r2: Optional[str]
+    r3: Optional[str]
+    r4: Optional[str]
+    r5: Optional[str]
+    c1: Optional[str]
+    c2: Optional[str]
+    c3: Optional[str]
+    c4: Optional[str]
+    c5: Optional[str]
+    u1: Optional[str]
+    u2: Optional[str]
+    ziel: Optional[str]
+    herausforderung: Optional[str]
+    tools: Optional[str]
+    massnahmen: Optional[str]
+    template_variant: Optional[str] = "preview"
+
+@app.post("/analyze")
+async def analyze(data: FormData):
+    scale_map = {
+        "trifft nicht zu": 1,
+        "teilweise": 2,
+        "überwiegend": 3,
+        "voll zutreffend": 4
+    }
+
+    def score(fields):
+        return sum([scale_map.get(getattr(data, f), 0) for f in fields])
+
+    readiness_fields = ["r1", "r2", "r3", "r4", "r5"]
+    compliance_fields = ["c2", "c3", "c5"]
+
+    score_readiness = score(readiness_fields)
+    score_compliance = score(compliance_fields)
+    score_total = score_readiness + score_compliance
+
+    bewertung = (
+        "kritisch" if score_total < 10 else
+        "ausbaufähig" if score_total < 20 else
+        "gut"
+    )
+
+    executive_summary = "Ihre Organisation zeigt solide Ansätze im Bereich KI." if bewertung == "gut" else                         "Es bestehen grundlegende Voraussetzungen für KI-Nutzung." if bewertung == "ausbaufähig" else                         "Wichtige Grundlagen für KI müssen noch geschaffen werden."
+
+    analyse = "Sie verfügen über ein gewisses Maß an KI-Bereitschaft. Die Datenbasis und das Wissen sind ausbaufähig."
 
     result = {
-        "name": data.get("name", "Max Mustermann"),
-        "email": data.get("email"),
-        "unternehmen": data.get("unternehmen", "Muster GmbH"),
-        "datum": today,
-        "branche": data.get("branche"),
-        "bereich": data.get("bereich"),
-        "ziel": data.get("ziel"),
-        "tools": data.get("tools"),
-        "score": 85,
-        "status": "aktiv",
-        "bewertung": "gut",
-        "executive_summary": "Dieses KI-Briefing zeigt die wichtigsten Chancen und Risiken für die Muster GmbH.",
-        "analyse": "Der Einsatz von KI-Tools wie Make und Notion AI eröffnet erhebliche Effizienzreserven.",
+        "executive_summary": executive_summary,
+        "analyse": analyse,
         "empfehlung1": {
             "titel": "Dringende Hebelmaßnahme",
             "beschreibung": "Automatisierung interner Workflows mit Make starten.",
@@ -56,7 +101,7 @@ def analyze():
             "langfristig": "KI als festen Bestandteil der Unternehmenskultur etablieren."
         },
         "ressourcen": "Plattformen wie aiCampus, Bundesförderprogramme (z. B. go-digital), Branchennetzwerke.",
-        "zukunft": "Mit einem klaren KI-Fahrplan kann die Muster GmbH zum Branchenvorbild werden.",
+        "zukunft": "Mit einem klaren KI-Fahrplan kann die Organisation zum Vorbild werden.",
         "risikoprofil": {
             "risikoklasse": "Moderat",
             "begruendung": "Nutzung generativer Tools mit sensiblen Daten.",
@@ -71,48 +116,14 @@ def analyze():
         ],
         "branchenvergleich": "Die IT-Branche liegt beim KI-Einsatz vor anderen Sektoren.",
         "trendreport": "Multimodale KI-Systeme gewinnen an Bedeutung.",
-        "visionaer": "Ihre Agentur schafft doppelt so viele Projekte mit halbem Zeitaufwand."
+        "vision": "Ihre Agentur schafft doppelt so viele Projekte mit halbem Zeitaufwand.",
+        "score_readiness": score_readiness,
+        "score_compliance": score_compliance,
+        "score_total": score_total,
+        "bewertung": bewertung
     }
 
-    return jsonify(result)
-
-@app.route("/generate-pdf", methods=["POST"])
-def generate_pdf():
-    data = request.json
-    print("PDF-Daten empfangen:", data)
-
-    api_key = os.environ.get("PDFMONKEY_API_KEY")
-    template_id = os.environ.get("PDFMONKEY_TEMPLATE_ID")
-
-    if not api_key or not template_id:
-        return jsonify({"error": "PDFMonkey-Konfiguration fehlt"}), 500
-
-    try:
-        response = requests.post(
-            "https://api.pdfmonkey.io/api/v1/documents",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            },
-            json={
-                "document": {
-                    "document_template_id": template_id,
-                    "payload": data
-                }
-            }
-        )
-
-        if response.status_code != 201:
-            print("❌ PDFMonkey-Fehler:", response.text)
-            return jsonify({"error": "PDF konnte nicht erstellt werden"}), 500
-
-        pdf_url = response.json().get("document", {}).get("download_url")
-        return jsonify({"pdf_url": pdf_url})
-
-    except Exception as e:
-        print("❌ Ausnahmefehler:", e)
-        return jsonify({"error": "Serverfehler"}), 500
+    return result
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
