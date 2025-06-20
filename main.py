@@ -1,6 +1,6 @@
 import os
 import requests
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -8,19 +8,24 @@ from typing import Optional
 
 app = FastAPI()
 
-# CORS für alle Ursprünge
+# Final CORS setup: specific origins, no regex, no manual OPTIONS
+origins = [
+    "https://check.ki-sicherheit.jetzt",
+    "https://make.ki-sicherheit.jetzt",
+    "https://agent.ki-sicherheit.jetzt",
+    "https://ki-sicherheit.jetzt",
+    "https://ki-sicherheit.netlify.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=".*",
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Manuelles Abfangen des OPTIONS-Preflight-Requests
-@app.options("/generate-pdf")
-async def options_handler(request: Request):
-    return JSONResponse(status_code=200, content={"message": "CORS OK"})
 
 class DummyData(BaseModel):
     name: str
