@@ -1,13 +1,14 @@
 import os
 import requests
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
 app = FastAPI()
 
-# Allow all origins temporarily for CORS troubleshooting
+# CORS für alle Ursprünge
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=".*",
@@ -15,6 +16,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Manuelles Abfangen des OPTIONS-Preflight-Requests
+@app.options("/generate-pdf")
+async def options_handler(request: Request):
+    return JSONResponse(status_code=200, content={"message": "CORS OK"})
 
 class DummyData(BaseModel):
     name: str
@@ -24,7 +30,6 @@ class DummyData(BaseModel):
 @app.post("/generate-pdf")
 async def generate_pdf(data: DummyData):
     try:
-        # PDFMonkey Setup
         api_key = os.getenv("PDFMONKEY_API_KEY")
         template_id = os.getenv("PDFMONKEY_TEMPLATE_ID_PREVIEW") if data.template_variant == "preview" else os.getenv("PDFMONKEY_TEMPLATE_ID")
         if not api_key or not template_id:
