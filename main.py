@@ -1,113 +1,82 @@
 
 import os
-import openai
 import requests
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional
-from starlette.responses import JSONResponse
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import openai
 
-app = FastAPI()
+app = Flask(__name__)
+CORS(app)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Empfehlung: spezifische Domains in Produktion
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-openai.api_key = os.getenv("OPENAI_API_KEY")
-PDFMONKEY_TEMPLATE_FULL = os.getenv("PDFMONKEY_TEMPLATE_FULL")
-PDFMONKEY_TEMPLATE_PREVIEW = os.getenv("PDFMONKEY_TEMPLATE_PREVIEW")
-PDFMONKEY_API_KEY = os.getenv("PDFMONKEY_API_KEY")
-MAKE_WEBHOOK_URL = os.getenv("MAKE_WEBHOOK_URL")
-
-class InputData(BaseModel):
-    name: str
-    unternehmen: Optional[str]
-    email: str
-    branche: Optional[str]
-    digital_level: Optional[str]
-    datenqualitaet: Optional[str]
-    ziel_ki: Optional[str]
-    tools_im_einsatz: Optional[str]
-    herausforderung: Optional[str]
-    ziel_ki_kurzfristig: Optional[str]
-    massnahmen_geplant: Optional[str]
-
-def gpt_analysis(data: InputData):
-    prompt = f'''
-Du bist ein KI-Analyst. Analysiere folgende Unternehmensinformationen und gib eine strukturierte Einschätzung:
-Name: {data.name}
-Branche: {data.branche}
-Digitalisierungsgrad: {data.digital_level}
-Datenqualität: {data.datenqualitaet}
-Geplanter KI-Einsatz: {data.ziel_ki}
-Tools im Einsatz: {data.tools_im_einsatz}
-Herausforderung: {data.herausforderung}
-Ziel mit KI: {data.ziel_ki_kurzfristig}
-Geplante Maßnahmen: {data.massnahmen_geplant}
-
-Gib zurück:
-- Executive Summary
-- Drei konkrete Empfehlungen (Titel, Beschreibung, nächster Schritt, Tool)
-- Compliance-Risiko (Risikostufe, Begründung, Pflichten)
-- Tooltipps (2-3 Tools + Nutzen)
-- Fördertipps (1-2 Programme)
-- Branchenvergleich
-- Trendreport
-- Vision
-'''
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.7,
-        max_tokens=1000
-    )
-    return response["choices"][0]["message"]["content"]
-
-def send_to_pdfmonkey(template_id, payload):
-    headers = {
-        "Authorization": f"Bearer {PDFMONKEY_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "document": {
-            "template_id": template_id,
-            "payload": payload
-        }
-    }
-    return requests.post("https://api.pdfmonkey.io/api/v1/documents", headers=headers, json=data)
-
-@app.get("/")
-async def root():
-    return {"message": "Service läuft"}
-
-@app.post("/generate-pdf")
-async def generate_pdf(request: Request):
+@app.route("/generate-pdf", methods=["POST"])
+def generate_pdf():
     try:
-        body = await request.json()
-        data = InputData(**body)
-        gpt_result = gpt_analysis(data)
-        payload = {
-            "name": data.name,
-            "unternehmen": data.unternehmen,
-            "email": data.email,
-            "branche": data.branche,
-            "zusammenfassung": gpt_result
+        data = request.get_json()
+
+        # GPT-Analyse (optional)
+        gpt_api_key = os.getenv("OPENAI_API_KEY")
+        if gpt_api_key:
+            openai.api_key = gpt_api_key
+            gpt_response = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Analysiere die übermittelten Unternehmensdaten aus einem Fragebogen zur KI-Readiness, KI-Compliance und Anwendungsfällen. Formuliere eine verständliche und praxisnahe Zusammenfassung mit Handlungsempfehlungen, Tools, Fördermöglichkeiten und Risiken."
+                    },
+                    {
+                        "role": "user",
+                        "content": str(data)
+                    }
+                ]
+            )
+            analysis = gpt_response.choices[0].message["content"]
+        else:
+            analysis = "Keine GPT-Analyse durchgeführt (API-Key fehlt)."
+
+        api_key = os.getenv("PDFMONKEY_API_KEY")
+        template_id = os.getenv("PDFMONKEY_TEMPLATE_ID_PREVIEW") if data.get("template_variant") == "preview" else os.getenv("PDFMONKEY_TEMPLATE_ID")
+        if not api_key or not template_id:
+            return jsonify({"error": "PDFMonkey keys fehlen."}), 500
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
         }
 
-        send_to_pdfmonkey(PDFMONKEY_TEMPLATE_PREVIEW, payload)
-        send_to_pdfmonkey(PDFMONKEY_TEMPLATE_FULL, payload)
+        payload = {
+            "document": {
+                "document_template_id": template_id,
+                "payload": {
+                    "name": data.get("name"),
+                    "email": data.get("email"),
+                    "unternehmen": data.get("unternehmen"),
+                    "ziel": data.get("ziel"),
+                    "branche": data.get("branche"),
+                    "antworten": data,
+                    "analyse": analysis
+                }
+            }
+        }
 
-        if MAKE_WEBHOOK_URL:
+        response = requests.post("https://api.pdfmonkey.io/api/v1/documents", headers=headers, json=payload)
+        if response.status_code != 201:
+            return jsonify({"error": "PDFMonkey Error", "details": response.text}), 500
+
+        pdf_url = response.json()["data"]["attributes"]["download_url"]
+
+        # Optionale Weiterleitung an Make
+        make_url = os.getenv("MAKE_WEBHOOK_URL")
+        if make_url:
             try:
-                requests.post(MAKE_WEBHOOK_URL, json=payload, timeout=5)
-            except:
-                pass
+                requests.post(make_url, json={"pdf_url": pdf_url, "email": data.get("email")})
+            except Exception as err:
+                print(f"Fehler beim Make-Webhook: {err}")
 
-        return JSONResponse(content={"message": "PDFs generiert"}, status_code=200)
+        return jsonify({"pdf_url": pdf_url})
     except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"message": "Service läuft"})
