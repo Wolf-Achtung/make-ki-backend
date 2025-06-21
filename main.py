@@ -8,8 +8,6 @@ from openai import OpenAI
 # Setup
 app = Flask(__name__)
 CORS(app)
-
-# Logging aktivieren
 logging.basicConfig(level=logging.INFO)
 
 # API-Keys aus Umgebungsvariablen
@@ -47,10 +45,10 @@ def analyse_mit_gpt(daten):
             max_tokens=800
         )
         ergebnis = response.choices[0].message.content.strip()
-        logging.info("GPT-Antwort erhalten.")
+        logging.info("✅ GPT-Antwort erhalten.")
         return ergebnis
     except Exception as e:
-        logging.error(f"Fehler bei GPT-Abfrage: {e}")
+        logging.error(f"❌ Fehler bei GPT-Abfrage: {e}")
         return "Fehler bei der GPT-Auswertung."
 
 def sende_an_pdfmonkey(template_id, payload):
@@ -66,25 +64,31 @@ def sende_an_pdfmonkey(template_id, payload):
             }
         }
         res = requests.post("https://api.pdfmonkey.io/api/v1/documents", headers=headers, json=data)
-        logging.info(f"PDFMonkey-Antwort {res.status_code}")
-        return res.status_code
+        logging.info(f"📄 PDFMonkey Status {res.status_code}")
+        if res.status_code == 201:
+            return res.json()["data"]["attributes"]["download_url"]
+        else:
+            logging.warning("⚠️ PDFMonkey kein Dokument erstellt.")
+            return None
     except Exception as e:
-        logging.error(f"Fehler bei PDFMonkey: {e}")
-        return 500
+        logging.error(f"❌ Fehler bei PDFMonkey: {e}")
+        return None
 
 def sende_webhook(payload):
     try:
         res = requests.post(MAKE_WEBHOOK_URL, json=payload)
-        logging.info(f"Webhook gesendet – Status: {res.status_code}")
+        logging.info(f"📡 Webhook gesendet – Status: {res.status_code}")
         return res.status_code
     except Exception as e:
-        logging.error(f"Webhook-Fehler: {e}")
+        logging.error(f"❌ Webhook-Fehler: {e}")
         return 500
 
 @app.route("/generate-pdf", methods=["POST"])
 def generate_pdf():
     try:
         data = request.get_json()
+        logging.info("📩 Anfrage erhalten: %s", data)
+
         if not data:
             return jsonify({"error": "Kein JSON erhalten."}), 400
 
@@ -97,24 +101,26 @@ def generate_pdf():
             "zusammenfassung": gpt_resultat
         }
 
-        status_preview = sende_an_pdfmonkey(PDFMONKEY_TEMPLATE_ID_PREVIEW, payload)
-        status_full = sende_an_pdfmonkey(PDFMONKEY_TEMPLATE_ID, payload)
-        status_webhook = sende_webhook(payload)
+        preview_url = sende_an_pdfmonkey(PDFMONKEY_TEMPLATE_ID_PREVIEW, payload)
+        full_url = sende_an_pdfmonkey(PDFMONKEY_TEMPLATE_ID, payload)
+        webhook_status = sende_webhook(payload)
 
-        if all(code == 201 for code in [status_preview, status_full]) and status_webhook in [200, 201]:
-            return jsonify({"message": "✅ Auswertung erfolgreich generiert.", "preview": True})
+        if preview_url and full_url and webhook_status in [200, 201]:
+            return jsonify({
+                "message": "✅ Auswertung erfolgreich generiert.",
+                "preview": preview_url,
+                "full": full_url
+            })
         else:
-            logging.warning("Ein oder mehrere Dienste haben fehlschlagen.")
-            return jsonify({"error": "Fehler bei einem externen Dienst."}), 500
+            return jsonify({"error": "Ein Dienst hat versagt."}), 500
 
     except Exception as e:
-        logging.exception("Fehler in /generate-pdf")
+        logging.exception("❌ Fehler in /generate-pdf")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/", methods=["GET"])
 def home():
     return "✅ Backend läuft"
 
-# Startblock für Railway-kompatiblen Start
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
