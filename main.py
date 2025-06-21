@@ -1,92 +1,94 @@
+
 import os
-import traceback
+import json
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import openai
-import requests
 
 app = Flask(__name__)
 CORS(app)
 
-# API-Keys aus Umgebungsvariablen
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-PDFMONKEY_API_KEY = os.getenv("PDFMONKEY_API_KEY")
-PDFMONKEY_TEMPLATE_ID = os.getenv("PDFMONKEY_TEMPLATE_ID")
-PDFMONKEY_TEMPLATE_ID_PREVIEW = os.getenv("PDFMONKEY_TEMPLATE_ID_PREVIEW")
-MAKE_WEBHOOK_URL = os.getenv("MAKE_WEBHOOK_URL")
+# Konfiguration
+PDFMONKEY_API_KEY = os.environ.get("PDFMONKEY_API_KEY")
+PDFMONKEY_TEMPLATE_ID = os.environ.get("PDFMONKEY_TEMPLATE_ID")
+PDFMONKEY_TEMPLATE_ID_PREVIEW = os.environ.get("PDFMONKEY_TEMPLATE_ID_PREVIEW")
+MAKE_WEBHOOK_URL = os.environ.get("MAKE_WEBHOOK_URL")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-# GPT-Antwort generieren
-def generate_gpt_summary(data):
-    prompt = f"""
-    Du bist ein KI-Analyst. Analysiere folgende Unternehmensinformationen und gib eine strukturierte Einschätzung zurück:
+openai.api_key = OPENAI_API_KEY
 
-    Unternehmen: {data.get("unternehmen")}
-    Branche: {data.get("branche")}
-    Tech-Verständnis: {data.get("tech_verstaendnis")}
-    Ziel mit KI: {data.get("ziel_ki_kurzfristig")}
-    Herausforderung: {data.get("data_herausforderung")}
-    Maßnahmen: {data.get("massnahmen_geplant")}
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"message": "KI-Auswertung Backend aktiv"}), 200
 
-    Gib ein Executive Summary zurück (2–4 Sätze) auf Deutsch.
-    """
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=500,
-        api_key=OPENAI_API_KEY
-    )
-    return response.choices[0].message["content"]
-
-# PDFMonkey-API-Aufruf
-def send_to_pdfmonkey(template_id, payload):
-    headers = {
-        "Authorization": f"Bearer {PDFMONKEY_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    body = {
-        "document": {
-            "template_id": template_id,
-            "payload": payload
-        }
-    }
-    response = requests.post("https://api.pdfmonkey.io/api/v1/documents", json=body, headers=headers)
-    if response.ok:
-        return response.json()["data"]["attributes"]["download_url"]
-    else:
-        raise Exception(f"PDFMonkey-Fehler: {response.status_code} – {response.text}")
-
-# Hauptroute
-@app.route("/generate-pdf", methods=["POST", "OPTIONS"])
+@app.route("/generate-pdf", methods=["POST"])
 def generate_pdf():
-    if request.method == "OPTIONS":
-        # Handle CORS preflight
-        return jsonify({"message": "CORS preflight OK"}), 200
-
     try:
-        data = request.get_json()
-        print("Empfangene Daten:", data)
+        data = request.json
 
-        zusammenfassung = generate_gpt_summary(data)
-        payload = {
-            "name": data.get("name"),
-            "unternehmen": data.get("unternehmen"),
-            "branche": data.get("branche"),
-            "zusammenfassung": zusammenfassung
+        # GPT-Auswertung generieren
+        gpt_input = f"""
+        Unternehmensprofil:
+        Branche: {data.get("branche")}
+        Herausforderungen: {data.get("herausforderung")}
+        Ziel: {data.get("ziel")}
+        Bestehende Tools: {data.get("tools")}
+
+        Formuliere eine prägnante Executive Summary mit konkreten Empfehlungen, Roadmap und Tooltipps für ein KMU.
+        """
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": gpt_input}],
+            temperature=0.7,
+            max_tokens=800
+        )
+
+        summary = response.choices[0].message.content.strip()
+        data["zusammenfassung"] = summary
+
+        # Vorschau erzeugen
+        preview_payload = {
+            "document": {
+                "template_id": PDFMONKEY_TEMPLATE_ID_PREVIEW,
+                "payload": data
+            }
         }
+        preview_response = requests.post(
+            "https://api.pdfmonkey.io/api/v1/documents",
+            headers={
+                "Authorization": f"Bearer {PDFMONKEY_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            data=json.dumps(preview_payload)
+        )
+        preview_url = preview_response.json()["data"]["attributes"]["download_url"]
 
-        preview_url = send_to_pdfmonkey(PDFMONKEY_TEMPLATE_ID_PREVIEW, payload)
-        full_url = send_to_pdfmonkey(PDFMONKEY_TEMPLATE_ID, payload)
+        # Vollversion erzeugen (async, für späteren Versand)
+        full_payload = {
+            "document": {
+                "template_id": PDFMONKEY_TEMPLATE_ID,
+                "payload": data
+            }
+        }
+        requests.post(
+            "https://api.pdfmonkey.io/api/v1/documents",
+            headers={
+                "Authorization": f"Bearer {PDFMONKEY_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            data=json.dumps(full_payload)
+        )
 
-        # Optional: Trigger Webhook (Make/Integromat)
+        # Make-WebHook auslösen
         if MAKE_WEBHOOK_URL:
-            requests.post(MAKE_WEBHOOK_URL, json=payload)
+            requests.post(MAKE_WEBHOOK_URL, json=data)
 
-        return jsonify({
-            "preview": preview_url,
-            "full": full_url
-        })
+        return jsonify({"status": "success", "previewURL": preview_url})
 
     except Exception as e:
-        print("Fehler beim Generieren:", e)
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# Startblock für Railway-kompatiblen Flask-Server
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
