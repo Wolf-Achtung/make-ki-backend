@@ -1,94 +1,92 @@
-
 import os
-import requests
-import openai
+import traceback
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import openai
+import requests
 
 app = Flask(__name__)
 CORS(app)
 
+# API-Keys aus Umgebungsvariablen
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PDFMONKEY_API_KEY = os.getenv("PDFMONKEY_API_KEY")
 PDFMONKEY_TEMPLATE_ID = os.getenv("PDFMONKEY_TEMPLATE_ID")
 PDFMONKEY_TEMPLATE_ID_PREVIEW = os.getenv("PDFMONKEY_TEMPLATE_ID_PREVIEW")
 MAKE_WEBHOOK_URL = os.getenv("MAKE_WEBHOOK_URL")
 
-openai.api_key = OPENAI_API_KEY
+# GPT-Antwort generieren
+def generate_gpt_summary(data):
+    prompt = f"""
+    Du bist ein KI-Analyst. Analysiere folgende Unternehmensinformationen und gib eine strukturierte Einschätzung zurück:
 
+    Unternehmen: {data.get("unternehmen")}
+    Branche: {data.get("branche")}
+    Tech-Verständnis: {data.get("tech_verstaendnis")}
+    Ziel mit KI: {data.get("ziel_ki_kurzfristig")}
+    Herausforderung: {data.get("data_herausforderung")}
+    Maßnahmen: {data.get("massnahmen_geplant")}
 
+    Gib ein Executive Summary zurück (2–4 Sätze) auf Deutsch.
+    """
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=500,
+        api_key=OPENAI_API_KEY
+    )
+    return response.choices[0].message["content"]
+
+# PDFMonkey-API-Aufruf
 def send_to_pdfmonkey(template_id, payload):
-    print(f"[PDFMONKEY] Sending document to template {template_id}...")
     headers = {
         "Authorization": f"Bearer {PDFMONKEY_API_KEY}",
         "Content-Type": "application/json"
     }
-    data = {
+    body = {
         "document": {
             "template_id": template_id,
             "payload": payload
         }
     }
-    try:
-        res = requests.post("https://api.pdfmonkey.io/api/v1/documents", headers=headers, json=data)
-        print(f"[PDFMONKEY] Status: {res.status_code}, Response: {res.text}")
-        res.raise_for_status()
-    except Exception as e:
-        print(f"[ERROR] PDFMonkey request failed: {e}")
+    response = requests.post("https://api.pdfmonkey.io/api/v1/documents", json=body, headers=headers)
+    if response.ok:
+        return response.json()["data"]["attributes"]["download_url"]
+    else:
+        raise Exception(f"PDFMonkey-Fehler: {response.status_code} – {response.text}")
 
-
-@app.route("/")
-def index():
-    return "Service läuft!"
-
-
-@app.route("/generate-pdf", methods=["POST"])
+# Hauptroute
+@app.route("/generate-pdf", methods=["POST", "OPTIONS"])
 def generate_pdf():
+    if request.method == "OPTIONS":
+        # Handle CORS preflight
+        return jsonify({"message": "CORS preflight OK"}), 200
+
     try:
-        body = request.json
-        print("[BACKEND] Request empfangen:", body)
+        data = request.get_json()
+        print("Empfangene Daten:", data)
 
-        name = body.get("name")
-        email = body.get("email")
-        data = body.get("data", {})
-
-        prompt = f"""
-Du bist ein KI-Analyst. Analysiere die folgenden Informationen und gib eine strukturierte Empfehlung.
-Daten: {data}
-"""
-
-        gpt_response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=800
-        )
-        gpt_result = gpt_response.choices[0].message.content.strip()
-        print("[GPT] Ergebnis:", gpt_result)
-
+        zusammenfassung = generate_gpt_summary(data)
         payload = {
-            "name": name,
-            "email": email,
-            "unternehmen": body.get("unternehmen"),
-            "branche": body.get("branche"),
-            "antworten": data,
-            "gpt": gpt_result
+            "name": data.get("name"),
+            "unternehmen": data.get("unternehmen"),
+            "branche": data.get("branche"),
+            "zusammenfassung": zusammenfassung
         }
 
-        send_to_pdfmonkey(PDFMONKEY_TEMPLATE_ID_PREVIEW, payload)
-        send_to_pdfmonkey(PDFMONKEY_TEMPLATE_ID, payload)
+        preview_url = send_to_pdfmonkey(PDFMONKEY_TEMPLATE_ID_PREVIEW, payload)
+        full_url = send_to_pdfmonkey(PDFMONKEY_TEMPLATE_ID, payload)
 
+        # Optional: Trigger Webhook (Make/Integromat)
         if MAKE_WEBHOOK_URL:
-            print("[MAKE] Webhook wird gesendet...")
-            try:
-                res = requests.post(MAKE_WEBHOOK_URL, json=payload)
-                print(f"[MAKE] Status: {res.status_code}, Response: {res.text}")
-                res.raise_for_status()
-            except Exception as e:
-                print(f"[ERROR] Make request failed: {e}")
+            requests.post(MAKE_WEBHOOK_URL, json=payload)
 
-        return jsonify({"message": "Auswertung erfolgreich generiert."})
+        return jsonify({
+            "preview": preview_url,
+            "full": full_url
+        })
 
     except Exception as e:
-        print(f"[ERROR] Allgemeiner Fehler: {e}")
+        print("Fehler beim Generieren:", e)
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
