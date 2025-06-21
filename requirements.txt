@@ -1,6 +1,4 @@
-flask
 openai
 requests
-flask-cors
 fastapi
 uvicorn

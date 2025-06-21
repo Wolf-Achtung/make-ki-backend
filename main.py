@@ -1,114 +1,113 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+
 import os
+import openai
 import requests
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional
+from starlette.responses import JSONResponse
 
-app = Flask(__name__)
-CORS(app)
+app = FastAPI()
 
-@app.route("/")
-def index():
-    return "✅ KI-Backend aktiv – GPT-Dummy & PDFMonkey einsatzbereit."
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Empfehlung: spezifische Domains in Produktion
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.route("/analyze", methods=["POST"])
-def analyze():
-    data = request.json
-    print("Fragebogen empfangen:", data)
+openai.api_key = os.getenv("OPENAI_API_KEY")
+PDFMONKEY_TEMPLATE_FULL = os.getenv("PDFMONKEY_TEMPLATE_FULL")
+PDFMONKEY_TEMPLATE_PREVIEW = os.getenv("PDFMONKEY_TEMPLATE_PREVIEW")
+PDFMONKEY_API_KEY = os.getenv("PDFMONKEY_API_KEY")
+MAKE_WEBHOOK_URL = os.getenv("MAKE_WEBHOOK_URL")
 
-    result = {
-        "name": data.get("name", "Max Mustermann"),
-        "email": data.get("email"),
-        "unternehmen": data.get("unternehmen", "Muster GmbH"),
-        "datum": data.get("datum"),
-        "score": 85,
-        "status": "aktiv",
-        "bewertung": "gut",
-        "executive_summary": "Dieses KI-Briefing zeigt die wichtigsten Chancen und Risiken...",
-        "analyse": "Die Muster GmbH befindet sich in einem dynamischen Marktumfeld...",
-        "emp": [
-            {
-                "titel": "Dringende Hebelmaßnahme",
-                "beschreibung": "Automatisierung interner Workflows mit Make starten.",
-                "next_step": "Pilot-Workflow identifizieren und aufsetzen.",
-                "tool": "Make"
-            },
-            {
-                "titel": "Potenzial entfesseln",
-                "beschreibung": "Content-Erstellung durch Notion AI und DeepL Pro unterstützen.",
-                "next_step": "Redaktionsprozesse analysieren und KI integrieren.",
-                "tool": "Notion AI, DeepL Pro"
-            },
-            {
-                "titel": "Zukunft sichern",
-                "beschreibung": "Strategische Weiterbildung im Bereich KI für Schlüsselmitarbeiter.",
-                "next_step": "Online-Kurse bei aiCampus starten.",
-                "tool": "aiCampus"
-            }
-        ],
-        "roadmap": {
-            "kurzfristig": "Mindestens einen Prozess automatisieren.",
-            "mittelfristig": "KI-Standards im Unternehmen definieren.",
-            "langfristig": "KI als festen Bestandteil der Unternehmenskultur etablieren."
-        },
-        "ressourcen": "Plattformen wie aiCampus, Bundesförderprogramme...",
-        "zukunft": "Mit einem klaren KI-Fahrplan kann die Muster GmbH zum Branchenvorbild werden...",
-        "risikoprofil": {
-            "risikoklasse": "Moderat",
-            "begruendung": "Nutzung generativer Tools mit sensiblen Daten.",
-            "pflichten": ["Transparenzpflichten", "DSFA", "Mitarbeiterschulung"]
-        },
-        "tooltipps": [
-            {"name": "Make", "einsatz": "Workflow-Automatisierung", "warum": "Intuitiv und vielseitig"},
-            {"name": "Notion AI", "einsatz": "Content-Optimierung", "warum": "Smarte Textvorschläge"}
-        ],
-        "foerdertipps": [
-            {"programm": "go-digital", "zielgruppe": "KMU", "nutzen": "Bis zu 50% Förderung"}
-        ],
-        "branchenvergleich": "Die IT-Branche liegt beim KI-Einsatz vorn...",
-        "trendreport": "Multimodale Systeme & datensichere Private-AI-Lösungen kommen.",
-        "visionaer": "Ihre Agentur schafft doppelt so viel bei halbem Aufwand durch KI."
+class InputData(BaseModel):
+    name: str
+    unternehmen: Optional[str]
+    email: str
+    branche: Optional[str]
+    digital_level: Optional[str]
+    datenqualitaet: Optional[str]
+    ziel_ki: Optional[str]
+    tools_im_einsatz: Optional[str]
+    herausforderung: Optional[str]
+    ziel_ki_kurzfristig: Optional[str]
+    massnahmen_geplant: Optional[str]
+
+def gpt_analysis(data: InputData):
+    prompt = f'''
+Du bist ein KI-Analyst. Analysiere folgende Unternehmensinformationen und gib eine strukturierte Einschätzung:
+Name: {data.name}
+Branche: {data.branche}
+Digitalisierungsgrad: {data.digital_level}
+Datenqualität: {data.datenqualitaet}
+Geplanter KI-Einsatz: {data.ziel_ki}
+Tools im Einsatz: {data.tools_im_einsatz}
+Herausforderung: {data.herausforderung}
+Ziel mit KI: {data.ziel_ki_kurzfristig}
+Geplante Maßnahmen: {data.massnahmen_geplant}
+
+Gib zurück:
+- Executive Summary
+- Drei konkrete Empfehlungen (Titel, Beschreibung, nächster Schritt, Tool)
+- Compliance-Risiko (Risikostufe, Begründung, Pflichten)
+- Tooltipps (2-3 Tools + Nutzen)
+- Fördertipps (1-2 Programme)
+- Branchenvergleich
+- Trendreport
+- Vision
+'''
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+        max_tokens=1000
+    )
+    return response["choices"][0]["message"]["content"]
+
+def send_to_pdfmonkey(template_id, payload):
+    headers = {
+        "Authorization": f"Bearer {PDFMONKEY_API_KEY}",
+        "Content-Type": "application/json"
     }
+    data = {
+        "document": {
+            "template_id": template_id,
+            "payload": payload
+        }
+    }
+    return requests.post("https://api.pdfmonkey.io/api/v1/documents", headers=headers, json=data)
 
-    return jsonify(result)
+@app.get("/")
+async def root():
+    return {"message": "Service läuft"}
 
-@app.route("/generate-pdf", methods=["POST"])
-def generate_pdf():
-    data = request.json
-    print("PDF-Daten empfangen:", data)
-
-    api_key = os.environ.get("PDFMONKEY_API_KEY")
-    template_id = os.environ.get("PDFMONKEY_TEMPLATE_ID")
-
-    if not api_key or not template_id:
-        return jsonify({"error": "PDFMonkey-Konfiguration fehlt"}), 500
-
+@app.post("/generate-pdf")
+async def generate_pdf(request: Request):
     try:
-        response = requests.post(
-            "https://api.pdfmonkey.io/api/v1/documents",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            },
-            json={
-                "document": {
-                    "document_template_id": template_id,
-                    "payload": data,
-                    "publish": True
-                }
-            }
-        )
+        body = await request.json()
+        data = InputData(**body)
+        gpt_result = gpt_analysis(data)
+        payload = {
+            "name": data.name,
+            "unternehmen": data.unternehmen,
+            "email": data.email,
+            "branche": data.branche,
+            "zusammenfassung": gpt_result
+        }
 
-        if response.status_code != 201:
-            print("❌ PDFMonkey-Fehler:", response.text)
-            return jsonify({"error": "PDF konnte nicht erstellt werden"}), 500
+        send_to_pdfmonkey(PDFMONKEY_TEMPLATE_PREVIEW, payload)
+        send_to_pdfmonkey(PDFMONKEY_TEMPLATE_FULL, payload)
 
-        pdf_url = response.json().get("document", {}).get("download_url")
-        return jsonify({"pdf_url": pdf_url})
+        if MAKE_WEBHOOK_URL:
+            try:
+                requests.post(MAKE_WEBHOOK_URL, json=payload, timeout=5)
+            except:
+                pass
 
+        return JSONResponse(content={"message": "PDFs generiert"}, status_code=200)
     except Exception as e:
-        print("❌ Ausnahmefehler:", e)
-        return jsonify({"error": "Serverfehler"}), 500
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
