@@ -1,92 +1,101 @@
+
 import os
-import requests
 import openai
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Environment Variables
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+PDFMONKEY_API_KEY = os.getenv("PDFMONKEY_API_KEY")
 PDFMONKEY_TEMPLATE_ID = os.getenv("PDFMONKEY_TEMPLATE_ID")
 PDFMONKEY_TEMPLATE_ID_PREVIEW = os.getenv("PDFMONKEY_TEMPLATE_ID_PREVIEW")
-PDFMONKEY_API_KEY = os.getenv("PDFMONKEY_API_KEY")
-MAKE_WEBHOOK_URL = os.getenv("MAKE_WEBHOOK_URL")
 
-def generate_gpt_analysis(form_data):
+openai.api_key = OPENAI_API_KEY
+
+
+@app.route("/")
+def index():
+    return jsonify({"message": "Service läuft"})
+
+
+def run_gpt_analysis(data):
     prompt = f"""
-Du bist ein KI-Experte. Analysiere auf Basis der folgenden Angaben das KI-Potenzial und gib Empfehlungen für ein kleines oder mittleres Unternehmen:
+    Du bist ein KI-Analyst. Analysiere folgende Unternehmensinformationen und gib eine strukturierte Einschätzung:
+    - Unternehmen: {data.get("name_unternehmen")}
+    - Branche: {data.get("branche")}
+    - Teamgröße: {data.get("team")}
+    - Ziel KI: {data.get("ziel_ki")}
+    - KI-Verständnis: {data.get("tech_verstaendnis")}
+    - Datenlage: {data.get("datenlage")}
+    - Datenarten: {data.get("datenarten")}
+    - Datenherausforderung: {data.get("daten_herausforderung")}
+    - Ziel mit KI: {data.get("ziel_mit_ki")}
+    - Maßnahmen: {data.get("massnahmen_geplant")}
 
-Name: {form_data.get("name")}
-Unternehmen: {form_data.get("unternehmen")}
-Branche: {form_data.get("branche")}
-Selbstständig: {form_data.get("ist_selbststaendig")}
-Ziel mit KI: {form_data.get("ziel_ki")}
-Technisches Verständnis: {form_data.get("tech_verstaendnis")}
-Datenqualität: {form_data.get("datenqualitaet")}
-Verwendet bereits KI-Tools: {form_data.get("verwendet_ki_tools")}
-Risiken bekannt: {form_data.get("kennt_risiken")}
-Dokumentation vorhanden: {form_data.get("hat_ki_dokumentation")}
-Konkrete Maßnahmen geplant: {form_data.get("massnahmen_geplant")}
-Tools im Einsatz: {form_data.get("tools")}
-Größte Herausforderung: {form_data.get("daten_herausforderung")}
-Geschäftsbereich: {form_data.get("geschaeftsbereich")}
-Anwendungsfall: {form_data.get("anwendungsfall")}
+    Gib zurück:
+    - Executive Summary
+    - Drei konkrete GPT-Empfehlungen (Titel, Beschreibung, nächster Schritt, Tool)
+    - Compliance-Checkliste (Risikostufe, Begründung, Pflichten)
+    - Tool-Tipps (2–3 Tools + Nutzen)
+    - GPT-Bewertung (1–10 Prognose)
+    - Branchenvergleich
+    - Vision
+    """
 
-Strukturiere deine Antwort bitte in folgende Abschnitte:
-- Executive Summary
-- Analyse
-- Drei Empfehlungen mit Titel, Beschreibung, Tool, Next Step
-- Compliance-Risiko (mit Risikoklasse, Begründung, Pflichten)
-- Roadmap (kurz-, mittel-, langfristig)
-- Tool-Tipps
-- Fördertipps
-- Branchenvergleich
-- Trendreport
-- Vision
-"""
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=1200
+        )
+        return response.choices[0].message["content"]
+    except Exception as e:
+        return f"Fehler bei GPT: {str(e)}"
 
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.7,
-        max_tokens=1500
-    )
 
-    return response["choices"][0]["message"]["content"]
-
-@app.route("/analyze", methods=["POST"])
-def analyze():
-    form_data = request.json
-    gpt_output = generate_gpt_analysis(form_data)
-
-    result = {
-        "name": form_data.get("name"),
-        "unternehmen": form_data.get("unternehmen"),
-        "email": form_data.get("email"),
-        "branche": form_data.get("branche"),
-        "analyse": gpt_output,
-        "template_variant": form_data.get("template_variant", "preview")
-    }
-
+def send_to_pdfmonkey(template_id, payload):
     headers = {
         "Authorization": f"Bearer {PDFMONKEY_API_KEY}",
         "Content-Type": "application/json"
     }
-
-    document_payload = {
+    data = {
         "document": {
-            "template_id": PDFMONKEY_TEMPLATE_ID_PREVIEW if result["template_variant"] == "preview" else PDFMONKEY_TEMPLATE_ID,
-            "payload": result
+            "template_id": template_id,
+            "payload": payload
         }
     }
+    response = requests.post("https://api.pdfmonkey.io/api/v1/documents", headers=headers, json=data)
+    return response.status_code
 
-    pdf_response = requests.post("https://api.pdfmonkey.io/api/v1/documents", json=document_payload, headers=headers)
 
-    if MAKE_WEBHOOK_URL:
-        try:
-            requests.post(MAKE_WEBHOOK_URL, json=result, timeout=4)
-        except Exception:
-            pass
+@app.route("/generate-pdf", methods=["POST"])
+def generate_pdf():
+    try:
+        body = request.get_json()
+        gpt_result = run_gpt_analysis(body)
 
-    return jsonify({"message": "Analyse abgeschlossen", "pdf_response": pdf_response.status_code})
+        payload = {
+            "name": body.get("name_unternehmen"),
+            "email": body.get("email"),
+            "branche": body.get("branche"),
+            "team": body.get("team"),
+            "ziel_ki": body.get("ziel_ki"),
+            "gpt_result": gpt_result
+        }
+
+        send_to_pdfmonkey(PDFMONKEY_TEMPLATE_ID_PREVIEW, payload)
+        send_to_pdfmonkey(PDFMONKEY_TEMPLATE_ID, payload)
+
+        return jsonify({"message": "PDF wird generiert"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)

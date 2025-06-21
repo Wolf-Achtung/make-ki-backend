@@ -1,4 +1,4 @@
 flask
-openai
 requests
 flask-cors
+openai
