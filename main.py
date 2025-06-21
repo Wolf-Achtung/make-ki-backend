@@ -116,8 +116,8 @@ async def generate_pdf(request: Request):
     }
 
     if PDFMONKEY_TEMPLATE_PREVIEW:
-        send_to_pdfmonkey(PDFMONKEY_TEMPLATE_PREVIEW, payload)
+        send_to_pdfmonkey(PDFMONKEY_TEMPLATE_ID_PREVIEW, payload)
     if PDFMONKEY_TEMPLATE_FULL:
-        send_to_pdfmonkey(PDFMONKEY_TEMPLATE_FULL, payload)
+        send_to_pdfmonkey(PDFMONKEY_TEMPLATE_ID, payload)
 
     return JSONResponse({"pdf_status": "generating", "message": "PDF wird generiert", "gpt_preview": gpt_result})
