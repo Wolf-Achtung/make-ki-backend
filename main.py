@@ -6,10 +6,20 @@ from pydantic import BaseModel
 from typing import Literal
 from dotenv import load_dotenv
 import openai
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
 app = FastAPI()
+
+# CORS für alle Ursprünge aktivieren (für Netlify-Frontend)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # für Produktion z. B. ["https://make.ki-sicherheit.jetzt"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ENV Variablen für GPT und PDFMonkey
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
