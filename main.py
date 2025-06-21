@@ -1,163 +1,165 @@
 import os
-import logging
-from flask import Flask, request, jsonify, redirect
-from flask_cors import CORS
-from dotenv import load_dotenv
-import openai
 import requests
+import openai
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 
-load_dotenv()
-
-# Konfiguration
-openai.api_key = os.getenv("OPENAI_API_KEY")
-PDFMONKEY_API_KEY = os.getenv("PDFMONKEY_API_KEY")
-TEMPLATE_ID = os.getenv("PDFMONKEY_TEMPLATE_ID")
-TEMPLATE_ID_PREVIEW = os.getenv("PDFMONKEY_TEMPLATE_ID_PREVIEW")
-WEBHOOK_URL = os.getenv("WEBHOOK_MAKE_URL")
-
-# Logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Flask Setup
 app = Flask(__name__)
 CORS(app)
 
-# GPT-Analyse
-def gpt_auswertung(user_data):
-    prompt = f"""
-    Du bist ein KI-Berater. Analysiere folgende Unternehmensdaten und erstelle:
-    1. Eine Zusammenfassung (Executive Summary)
-    2. Eine fundierte Analyse
-    3. Drei konkrete Empfehlungen (Titel, Beschreibung, Tool, Next Step)
-    4. Eine KI-Roadmap (kurzfristig, mittelfristig, langfristig)
-    5. Fördertipps (Programm, Nutzen, Zielgruppe)
-    6. Ein Risikoprofil mit Risikoklasse, Begründung und Pflichten
-    7. Tooltipps mit Name, Einsatz und Begründung
-    8. Branchenvergleich & Trendreport
-    9. Vision für die KI-Zukunft
+# API-Keys & Template-IDs aus ENV
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+PDFMONKEY_API_KEY = os.getenv("PDFMONKEY_API_KEY")
+PDFMONKEY_TEMPLATE_ID = os.getenv("PDFMONKEY_TEMPLATE_ID")
+PDFMONKEY_TEMPLATE_ID_PREVIEW = os.getenv("PDFMONKEY_TEMPLATE_ID_PREVIEW")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-    Daten: {user_data}
-    """
+openai.api_key = OPENAI_API_KEY
+
+
+def run_gpt_analysis(user_payload):
     try:
+        prompt = f"""
+Analysiere die folgenden Unternehmensdaten und gib Empfehlungen, Roadmap, Risiken, Fördertipps und Tool-Einsatz zurück:
+{user_payload}
+        """
+
+        print("📡 GPT wird aufgerufen …")
         response = openai.chat.completions.create(
             model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": "Du bist ein KI-Berater für Unternehmen."},
+                {"role": "user", "content": prompt}
+            ],
             temperature=0.7
         )
-        return response.choices[0].message.content
-    except Exception as e:
-        logger.error(f"Fehler bei GPT-Analyse: {e}")
-        return "Analyse konnte nicht generiert werden."
 
-# PDFMonkey-Erstellung
-def erstelle_pdf(payload, template_id):
+        print("✅ GPT-Antwort empfangen.")
+        return response.choices[0].message.content.strip()
+
+    except Exception as e:
+        print(f"❌ GPT-Fehler: {str(e)}")
+        return "Analyse konnte nicht durchgeführt werden."
+
+
+def generate_pdf(template_id, payload, is_preview=False):
     url = "https://api.pdfmonkey.io/api/v1/documents"
     headers = {
         "Authorization": f"Bearer {PDFMONKEY_API_KEY}",
         "Content-Type": "application/json"
     }
+
     data = {
         "document": {
             "document_template_id": template_id,
             "payload": payload
         }
     }
+
     try:
-        res = requests.post(url, json=data, headers=headers)
-        res.raise_for_status()
-        doc_url = res.json().get("data", {}).get("attributes", {}).get("download_url", "")
-        logger.info(f"PDF erstellt mit URL: {doc_url}")
-        return doc_url
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        document = response.json().get("data")
+        pdf_url = document.get("download_url")
+
+        print(f"📄 PDF ({'Vorschau' if is_preview else 'Vollversion'}) erstellt: {pdf_url}")
+        return pdf_url
+
     except Exception as e:
-        logger.error(f"Fehler bei PDFMonkey: {e}")
+        print(f"❌ PDFMonkey-Fehler: {str(e)}")
         return None
 
-# Webhook an Make senden
-def sende_webhook(data):
-    try:
-        response = requests.post(WEBHOOK_URL, json=data)
-        logger.info(f"Webhook gesendet: {response.status_code}")
-    except Exception as e:
-        logger.error(f"Webhook-Fehler: {e}")
 
-# Flask Route
 @app.route("/generate-pdf", methods=["POST"])
-def generate_pdf():
+def generate():
     try:
         user_data = request.json
-        logger.info("Empfangene Formulardaten:")
-        logger.info(user_data)
+        print("📥 Eingehende Daten:", user_data)
 
         # GPT-Auswertung
-        gpt_result = gpt_auswertung(user_data)
-        logger.info("GPT-Auswertung erhalten.")
+        gpt_output = run_gpt_analysis(user_data)
 
-        # Dummy-Payload-Erweiterung mit GPT
+        # Dummystruktur + GPT-Ergebnisse integrieren
         payload = {
             **user_data,
-            "executive_summary": gpt_result,
-            "analyse": "Erste Analyse basierend auf den Angaben.",
+            "executive_summary": gpt_output,
+            "analyse": "Analyse folgt...",
             "empfehlung1": {
-                "titel": "KI sofort starten",
-                "beschreibung": "Nutzen Sie ChatGPT für E-Mail-Antworten.",
-                "tool": "ChatGPT",
-                "next_step": "Login auf openai.com und testen."
+                "titel": "Automatisierung starten",
+                "beschreibung": "Beginnen Sie mit einem KI-Tool für Texterstellung.",
+                "next_step": "Tool auswählen und testen",
+                "tool": "ChatGPT"
             },
             "empfehlung2": {
-                "titel": "Automatisierung ausbauen",
-                "beschreibung": "Wiederkehrende Aufgaben automatisieren.",
-                "tool": "Make",
-                "next_step": "Erstelle ein Szenario für Rechnungsversand."
+                "titel": "Prozesse analysieren",
+                "beschreibung": "KI-Potenziale im Rechnungswesen analysieren.",
+                "next_step": "Workflows mappen",
+                "tool": "Make.com"
             },
             "empfehlung3": {
-                "titel": "Mitarbeiter schulen",
-                "beschreibung": "Onboarding zu KI-Tools.",
-                "tool": "Lernplattform",
-                "next_step": "Erstelle ein Lernprogramm für dein Team."
+                "titel": "Weiterbildung starten",
+                "beschreibung": "Ihr Team fit für KI machen.",
+                "next_step": "Online-Kurs buchen",
+                "tool": "ki-campus.org"
             },
             "roadmap": {
-                "kurzfristig": "Testphase mit einfachen GPT-Aufgaben.",
-                "mittelfristig": "Prozessautomatisierung mit Make.",
-                "langfristig": "Individuelle KI-Anwendungen entwickeln."
+                "kurzfristig": "Einstieg durch einfache KI-Tools",
+                "mittelfristig": "Integration in Kernprozesse",
+                "langfristig": "KI-gestützte Entscheidungen"
             },
-            "ressourcen": "Kostenlose Tools, YouTube-Kurse, Förderprogramme.",
+            "ressourcen": "Open Source Tools, Förderprogramme",
             "foerdertipps": [
-                {"programm": "go-digital", "nutzen": "Beratung", "zielgruppe": "KMU"},
-                {"programm": "Digital Jetzt", "nutzen": "Investitionsförderung", "zielgruppe": "Mittelstand"}
+                {
+                    "programm": "go-digital",
+                    "nutzen": "Beratung und Umsetzung",
+                    "zielgruppe": "KMU"
+                },
+                {
+                    "programm": "Digital Jetzt",
+                    "nutzen": "Investitionen in KI",
+                    "zielgruppe": "mittelständische Unternehmen"
+                }
             ],
             "risikoprofil": {
-                "risikoklasse": "Mittel",
-                "begruendung": "Kein Hochrisiko-KI-Einsatz.",
-                "pflichten": ["Transparenz", "Datenmanagement"]
+                "risikoklasse": "mittel",
+                "begruendung": "Teilautomatisierte Kundendatenverarbeitung",
+                "pflichten": [
+                    "KI-Kennzeichnung",
+                    "Datenschutzprüfung",
+                    "Mitarbeiterschulung"
+                ]
             },
             "tooltipps": [
-                {"name": "Make", "einsatz": "Prozessautomatisierung", "warum": "Einfache Bedienung"},
-                {"name": "ChatGPT", "einsatz": "Texterstellung", "warum": "Hohe Qualität"}
+                {"name": "ChatGPT", "einsatz": "Texte & E-Mails", "warum": "effizient & schnell"},
+                {"name": "Fireflies", "einsatz": "Meeting-Protokolle", "warum": "automatisch & DSGVO-freundlich"}
             ],
-            "branchenvergleich": "Im Mittelfeld bei KI-Einführung.",
-            "trendreport": "Multimodale KI auf dem Vormarsch.",
-            "vision": "Individuelle KI-Lösungen, ganzheitlich integriert."
+            "branchenvergleich": "Ihr KI-Niveau liegt über dem Branchendurchschnitt.",
+            "trendreport": "Multimodale KI wird in Ihrer Branche wichtig.",
+            "vision": "Ihr Unternehmen wird KI-getrieben innovativ agieren."
         }
 
-        # Vorschau-PDF erstellen
-        preview_link = erstelle_pdf(payload, TEMPLATE_ID_PREVIEW)
-        if not preview_link:
-            return jsonify({"error": "PDF-Vorschau fehlgeschlagen"}), 500
+        # Vorschau erstellen
+        preview_link = generate_pdf(PDFMONKEY_TEMPLATE_ID_PREVIEW, payload, is_preview=True)
 
-        # Vollversion-PDF erstellen
-        voll_link = erstelle_pdf(payload, TEMPLATE_ID)
+        # Vollversion vorbereiten
+        generate_pdf(PDFMONKEY_TEMPLATE_ID, payload)
 
-        # Webhook an Make
-        sende_webhook(payload)
+        # Optional: Make-WebHook senden
+        if WEBHOOK_URL:
+            try:
+                requests.post(WEBHOOK_URL, json=payload)
+                print("📬 Webhook an Make gesendet.")
+            except Exception as e:
+                print(f"⚠️ Webhook-Fehler: {str(e)}")
 
-        logger.info("Fertig. Vorschau-Downloadlink zurückgegeben.")
-        return jsonify({"preview_url": preview_link})
+        # Rückgabe für Frontend
+        return jsonify({"preview": preview_link})
 
     except Exception as e:
-        logger.error(f"Fehler in /generate-pdf: {e}")
+        print(f"❌ Allgemeiner Fehler: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-# Railway-Kompatibilität
+
+# Für Railway / Docker
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
