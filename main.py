@@ -21,6 +21,10 @@ class PDFRequest(BaseModel):
     payload: dict
     version: Literal["preview", "full"]
 
+@app.get("/")
+async def root():
+    return {"message": "KI-Check Pro Backend läuft"}
+
 def analyze_payload(user_data):
     prompt = f"""
     Du bist ein KI-Berater. Analysiere folgende Nutzerdaten für ein Executive Briefing:
