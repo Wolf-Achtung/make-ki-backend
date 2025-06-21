@@ -4,10 +4,11 @@ import openai
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
+# Flask Setup
 app = Flask(__name__)
 CORS(app)
 
-# API-Keys & Template-IDs aus ENV
+# ENV-Werte
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PDFMONKEY_API_KEY = os.getenv("PDFMONKEY_API_KEY")
 PDFMONKEY_TEMPLATE_ID = os.getenv("PDFMONKEY_TEMPLATE_ID")
@@ -20,11 +21,10 @@ openai.api_key = OPENAI_API_KEY
 def run_gpt_analysis(user_payload):
     try:
         prompt = f"""
-Analysiere die folgenden Unternehmensdaten und gib Empfehlungen, Roadmap, Risiken, Fördertipps und Tool-Einsatz zurück:
+Analysiere die folgenden Unternehmensdaten und gib eine strukturierte, verständliche, praxisnahe Auswertung:
 {user_payload}
         """
-
-        print("📡 GPT wird aufgerufen …")
+        print("🤖 GPT-Auswertung wird gestartet …")
         response = openai.chat.completions.create(
             model="gpt-4",
             messages=[
@@ -33,7 +33,6 @@ Analysiere die folgenden Unternehmensdaten und gib Empfehlungen, Roadmap, Risike
             ],
             temperature=0.7
         )
-
         print("✅ GPT-Antwort empfangen.")
         return response.choices[0].message.content.strip()
 
@@ -43,28 +42,25 @@ Analysiere die folgenden Unternehmensdaten und gib Empfehlungen, Roadmap, Risike
 
 
 def generate_pdf(template_id, payload, is_preview=False):
-    url = "https://api.pdfmonkey.io/api/v1/documents"
-    headers = {
-        "Authorization": f"Bearer {PDFMONKEY_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    data = {
-        "document": {
-            "document_template_id": template_id,
-            "payload": payload
-        }
-    }
-
     try:
-        response = requests.post(url, headers=headers, json=data)
+        print(f"📄 PDF-Erstellung gestartet ({'Vorschau' if is_preview else 'Vollversion'}) …")
+        response = requests.post(
+            "https://api.pdfmonkey.io/api/v1/documents",
+            headers={
+                "Authorization": f"Bearer {PDFMONKEY_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "document": {
+                    "document_template_id": template_id,
+                    "payload": payload
+                }
+            }
+        )
         response.raise_for_status()
-        document = response.json().get("data")
-        pdf_url = document.get("download_url")
-
-        print(f"📄 PDF ({'Vorschau' if is_preview else 'Vollversion'}) erstellt: {pdf_url}")
+        pdf_url = response.json()["data"]["download_url"]
+        print(f"✅ PDF generiert: {pdf_url}")
         return pdf_url
-
     except Exception as e:
         print(f"❌ PDFMonkey-Fehler: {str(e)}")
         return None
@@ -74,77 +70,62 @@ def generate_pdf(template_id, payload, is_preview=False):
 def generate():
     try:
         user_data = request.json
-        print("📥 Eingehende Daten:", user_data)
+        print("📥 Formulardaten empfangen:", user_data)
 
-        # GPT-Auswertung
-        gpt_output = run_gpt_analysis(user_data)
+        gpt_result = run_gpt_analysis(user_data)
 
-        # Dummystruktur + GPT-Ergebnisse integrieren
+        # Zusammensetzen des Payloads für das PDF
         payload = {
             **user_data,
-            "executive_summary": gpt_output,
-            "analyse": "Analyse folgt...",
+            "executive_summary": gpt_result,
+            "analyse": "Vertiefende Analyse folgt basierend auf Ihren Antworten …",
             "empfehlung1": {
                 "titel": "Automatisierung starten",
-                "beschreibung": "Beginnen Sie mit einem KI-Tool für Texterstellung.",
+                "beschreibung": "Beginnen Sie mit einfachen Text-KI-Anwendungen.",
                 "next_step": "Tool auswählen und testen",
                 "tool": "ChatGPT"
             },
             "empfehlung2": {
-                "titel": "Prozesse analysieren",
-                "beschreibung": "KI-Potenziale im Rechnungswesen analysieren.",
-                "next_step": "Workflows mappen",
-                "tool": "Make.com"
+                "titel": "Team befähigen",
+                "beschreibung": "Schulen Sie Ihr Team für mehr KI-Kompetenz.",
+                "next_step": "Weiterbildung starten",
+                "tool": "KI-Campus"
             },
             "empfehlung3": {
-                "titel": "Weiterbildung starten",
-                "beschreibung": "Ihr Team fit für KI machen.",
-                "next_step": "Online-Kurs buchen",
-                "tool": "ki-campus.org"
+                "titel": "Förderung nutzen",
+                "beschreibung": "Beantragen Sie gezielte Unterstützung.",
+                "next_step": "Programm evaluieren",
+                "tool": "go-digital"
             },
             "roadmap": {
-                "kurzfristig": "Einstieg durch einfache KI-Tools",
-                "mittelfristig": "Integration in Kernprozesse",
-                "langfristig": "KI-gestützte Entscheidungen"
+                "kurzfristig": "Testphase mit Prototypen",
+                "mittelfristig": "Prozesse mit KI stützen",
+                "langfristig": "KI als strategisches Asset"
             },
-            "ressourcen": "Open Source Tools, Förderprogramme",
+            "ressourcen": "Freie Tools, Beraternetzwerke",
             "foerdertipps": [
-                {
-                    "programm": "go-digital",
-                    "nutzen": "Beratung und Umsetzung",
-                    "zielgruppe": "KMU"
-                },
-                {
-                    "programm": "Digital Jetzt",
-                    "nutzen": "Investitionen in KI",
-                    "zielgruppe": "mittelständische Unternehmen"
-                }
+                {"programm": "go-digital", "nutzen": "Beratung", "zielgruppe": "KMU"},
+                {"programm": "Digital Jetzt", "nutzen": "Investitionen", "zielgruppe": "mittelständische Unternehmen"}
             ],
             "risikoprofil": {
                 "risikoklasse": "mittel",
-                "begruendung": "Teilautomatisierte Kundendatenverarbeitung",
-                "pflichten": [
-                    "KI-Kennzeichnung",
-                    "Datenschutzprüfung",
-                    "Mitarbeiterschulung"
-                ]
+                "begruendung": "Teilautomatisierte Entscheidungsprozesse",
+                "pflichten": ["DSGVO-Konformität", "Transparenz", "Schulung"]
             },
             "tooltipps": [
-                {"name": "ChatGPT", "einsatz": "Texte & E-Mails", "warum": "effizient & schnell"},
-                {"name": "Fireflies", "einsatz": "Meeting-Protokolle", "warum": "automatisch & DSGVO-freundlich"}
+                {"name": "ChatGPT", "einsatz": "Texterstellung", "warum": "Schnell & einfach"},
+                {"name": "Make.com", "einsatz": "Automatisierung", "warum": "No-Code"}
             ],
-            "branchenvergleich": "Ihr KI-Niveau liegt über dem Branchendurchschnitt.",
-            "trendreport": "Multimodale KI wird in Ihrer Branche wichtig.",
-            "vision": "Ihr Unternehmen wird KI-getrieben innovativ agieren."
+            "branchenvergleich": "Sie liegen im oberen Drittel Ihrer Branche.",
+            "trendreport": "Multimodale KI auf dem Vormarsch.",
+            "vision": "Sie agieren KI-gestützt und zukunftsweisend."
         }
 
-        # Vorschau erstellen
-        preview_link = generate_pdf(PDFMONKEY_TEMPLATE_ID_PREVIEW, payload, is_preview=True)
-
-        # Vollversion vorbereiten
+        # PDF generieren
+        preview_url = generate_pdf(PDFMONKEY_TEMPLATE_ID_PREVIEW, payload, is_preview=True)
         generate_pdf(PDFMONKEY_TEMPLATE_ID, payload)
 
-        # Optional: Make-WebHook senden
+        # Webhook (Make) optional senden
         if WEBHOOK_URL:
             try:
                 requests.post(WEBHOOK_URL, json=payload)
@@ -152,14 +133,13 @@ def generate():
             except Exception as e:
                 print(f"⚠️ Webhook-Fehler: {str(e)}")
 
-        # Rückgabe für Frontend
-        return jsonify({"preview": preview_link})
+        return jsonify({"preview": preview_url})
 
     except Exception as e:
         print(f"❌ Allgemeiner Fehler: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
-# Für Railway / Docker
+# Railway-kompatibler Start
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
