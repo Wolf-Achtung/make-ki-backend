@@ -1,101 +1,98 @@
 import os
-import json
 import logging
-import traceback
-import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from dotenv import load_dotenv
 import openai
+import requests
 
-# Logging-Setup
+# Setup
+load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
-# Flask-Setup
 app = Flask(__name__)
 CORS(app)
 
-# API-Schlüssel und IDs
-openai.api_key = os.getenv("OPENAI_API_KEY")
-pdfmonkey_api_key = os.getenv("PDFMONKEY_API_KEY")
-pdfmonkey_template_id = os.getenv("PDFMONKEY_TEMPLATE_ID_PREVIEW")
-make_webhook_url = os.getenv("MAKE_WEBHOOK_URL")
+# Environment Variables
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+PDFMONKEY_API_KEY = os.getenv("PDFMONKEY_API_KEY")
+PDFMONKEY_TEMPLATE_ID = os.getenv("PDFMONKEY_TEMPLATE_ID")
+PDFMONKEY_TEMPLATE_ID_PREVIEW = os.getenv("PDFMONKEY_TEMPLATE_ID_PREVIEW")
+MAKE_WEBHOOK_URL = os.getenv("MAKE_WEBHOOK_URL")
 
-@app.route('/generate-pdf', methods=['POST'])
+openai.api_key = OPENAI_API_KEY
+
+# Hilfsfunktion: Dummy-Auswertung (ersetzt echte GPT-Analyse temporär)
+def generate_dummy_payload(data):
+    return {
+        "name": data.get("name"),
+        "unternehmen": data.get("unternehmen"),
+        "branche": data.get("branche"),
+        "email": data.get("email"),
+        "selbststaendig": data.get("selbststaendig"),
+        "readiness_fragen": "Technisch solide, aber ohne strategischen Plan.",
+        "compliance_fragen": "DSGVO teils beachtet, keine explizite KI-Governance.",
+        "usecase_fragen": "Textgenerierung geplant, geringe Toolintegration.",
+        "executive_summary": "Ihr Unternehmen zeigt KI-Bereitschaft, aber es fehlen klare Strukturen und Prozesse.",
+        "analyse": "Der Status ist experimentell. Chancen bestehen in der schnellen Umsetzung und im Marketing.",
+        "empfehlung1": "Einführung eines KI-Piloten mit definierten KPIs.",
+        "empfehlung2": "Aufbau eines internen KI-Teams mit Fortbildungsbudget.",
+        "empfehlung3": "Verankerung der KI-Governance in der Datenschutzstruktur.",
+        "roadmap": "3 Monate: Schulung. 6 Monate: Pilot. 12 Monate: Integration.",
+        "ressourcen": "Externe Beratung, interne Schulung, Fördermittel beantragen.",
+        "zukunft": "Automatisierung und multimodale KI-Integration möglich.",
+        "risikoprofil": "Moderat – Datenverarbeitung ohne volle Kontrolle.",
+        "tooltipps": "Nutzen Sie Tools wie ChatGPT, Notion AI, Midjourney.",
+        "foerdertipps": "BMWK-Innovationsgutscheine, Digital Jetzt.",
+        "branchenvergleich": "Sie liegen leicht über dem Durchschnitt der Branche.",
+        "trendreport": "2025: Sprach-KI, Agenten, Edge AI im Vormarsch.",
+        "vision": "Ihr Unternehmen als Vorreiter in kreativer KI-Nutzung."
+    }
+
+# Haupt-Route
+@app.route("/generate-pdf", methods=["POST"])
 def generate_pdf():
-    logging.info("📥 POST /generate-pdf gestartet")
-
     try:
         data = request.get_json()
-        logging.info(f"📦 Erhaltene Formulardaten:\n{json.dumps(data, indent=2)}")
+        logging.info("✅ Formulardaten empfangen:")
+        logging.info(data)
 
-        # Pflichtfelder prüfen
-        for field in ["name", "unternehmen", "branche"]:
-            if field not in data or not data[field]:
-                error_msg = f"❌ Fehlendes Pflichtfeld: {field}"
-                logging.error(error_msg)
-                return jsonify({"error": error_msg}), 400
+        # GPT- oder Dummy-Auswertung
+        payload = generate_dummy_payload(data)
 
-        # GPT-Auswertung vorbereiten
-        prompt = (
-            f"Unternehmen: {data['unternehmen']}\n"
-            f"Branche: {data['branche']}\n"
-            f"Ziel mit KI: {data.get('ziel_ki', 'Nicht angegeben')}\n"
-            f"Herausforderung: {data.get('herausforderung', 'Nicht angegeben')}\n"
-            f"Vorwissen: {data.get('verständnis', 'Unklar')}\n"
-            "Bitte erstelle eine kurze Zusammenfassung zur KI-Reife."
-        )
-        logging.info("🧠 Sende Anfrage an OpenAI ...")
+        # Auswahl Template
+        is_preview = data.get("preview", False)
+        template_id = PDFMONKEY_TEMPLATE_ID_PREVIEW if is_preview else PDFMONKEY_TEMPLATE_ID
+        logging.info(f"📄 Verwende Template-ID: {template_id}")
 
-        completion = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "Du bist ein KI-Berater."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-
-        zusammenfassung = completion['choices'][0]['message']['content']
-        logging.info(f"✅ GPT-Antwort erhalten:\n{zusammenfassung}")
-
-        # Vorschau-PDF generieren
-        payload = {
-            "document": {
-                "payload": {
-                    "name": data["name"],
-                    "unternehmen": data["unternehmen"],
-                    "branche": data["branche"],
-                    "zusammenfassung": zusammenfassung
-                },
-                "template_id": pdfmonkey_template_id,
-                "webhook_url": make_webhook_url
-            }
-        }
-
-        headers = {
-            "Authorization": f"Bearer {pdfmonkey_api_key}",
-            "Content-Type": "application/json"
-        }
-
-        logging.info("📄 Erzeuge PDF über PDFMonkey ...")
-        response = requests.post(
+        # Sende an PDFMonkey
+        pdfmonkey_response = requests.post(
             "https://api.pdfmonkey.io/api/v1/documents",
-            headers=headers,
-            json=payload
+            headers={
+                "Authorization": f"Bearer {PDFMONKEY_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "document": {
+                    "document_template_id": template_id,
+                    "payload": payload,
+                    "webhook_url": MAKE_WEBHOOK_URL
+                }
+            }
         )
 
-        if response.status_code == 201:
-            doc = response.json()
-            preview_url = doc.get("data", {}).get("attributes", {}).get("download_url", "")
-            logging.info(f"🎉 PDF-Vorschau erstellt: {preview_url}")
-            return jsonify({"preview": preview_url})
-        else:
-            logging.error(f"❌ PDFMonkey Fehler: {response.status_code} - {response.text}")
-            return jsonify({"error": "Fehler bei PDFMonkey"}), 502
+        if pdfmonkey_response.status_code != 201:
+            logging.error(f"❌ Fehler bei PDFMonkey: {pdfmonkey_response.text}")
+            return jsonify({"error": "PDF-Erstellung fehlgeschlagen"}), 500
+
+        document_id = pdfmonkey_response.json()["data"]["id"]
+        logging.info(f"📄 PDFMonkey-Dokument ID: {document_id}")
+
+        return jsonify({"success": True, "preview": is_preview, "pdf_id": document_id})
 
     except Exception as e:
-        logging.exception("❌ Unerwarteter Fehler:")
-        return jsonify({"error": f"Fehler bei der Auswertung: {str(e)}"}), 500
-
+        logging.exception("❌ Ausnahme beim Verarbeiten der Anfrage:")
+        return jsonify({"error": f"Interner Fehler: {str(e)}"}), 500
 
 # Railway-kompatibler Start
 if __name__ == "__main__":
