@@ -1,72 +1,77 @@
+
 import os
 import logging
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from dotenv import load_dotenv
-import openai
 import requests
+import openai
 
-# Setup
-load_dotenv()
+# Setup Logging
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
-CORS(app)
-
-# Environment Variables
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Load environment variables
 PDFMONKEY_API_KEY = os.getenv("PDFMONKEY_API_KEY")
 PDFMONKEY_TEMPLATE_ID = os.getenv("PDFMONKEY_TEMPLATE_ID")
 PDFMONKEY_TEMPLATE_ID_PREVIEW = os.getenv("PDFMONKEY_TEMPLATE_ID_PREVIEW")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MAKE_WEBHOOK_URL = os.getenv("MAKE_WEBHOOK_URL")
 
+# Init Flask
+app = Flask(__name__)
+CORS(app)
+
+# Configure OpenAI
 openai.api_key = OPENAI_API_KEY
 
-# Hilfsfunktion: Dummy-Auswertung (ersetzt echte GPT-Analyse temporär)
-def generate_dummy_payload(data):
-    return {
-        "name": data.get("name"),
-        "unternehmen": data.get("unternehmen"),
-        "branche": data.get("branche"),
-        "email": data.get("email"),
-        "selbststaendig": data.get("selbststaendig"),
-        "readiness_fragen": "Technisch solide, aber ohne strategischen Plan.",
-        "compliance_fragen": "DSGVO teils beachtet, keine explizite KI-Governance.",
-        "usecase_fragen": "Textgenerierung geplant, geringe Toolintegration.",
-        "executive_summary": "Ihr Unternehmen zeigt KI-Bereitschaft, aber es fehlen klare Strukturen und Prozesse.",
-        "analyse": "Der Status ist experimentell. Chancen bestehen in der schnellen Umsetzung und im Marketing.",
-        "empfehlung1": "Einführung eines KI-Piloten mit definierten KPIs.",
-        "empfehlung2": "Aufbau eines internen KI-Teams mit Fortbildungsbudget.",
-        "empfehlung3": "Verankerung der KI-Governance in der Datenschutzstruktur.",
-        "roadmap": "3 Monate: Schulung. 6 Monate: Pilot. 12 Monate: Integration.",
-        "ressourcen": "Externe Beratung, interne Schulung, Fördermittel beantragen.",
-        "zukunft": "Automatisierung und multimodale KI-Integration möglich.",
-        "risikoprofil": "Moderat – Datenverarbeitung ohne volle Kontrolle.",
-        "tooltipps": "Nutzen Sie Tools wie ChatGPT, Notion AI, Midjourney.",
-        "foerdertipps": "BMWK-Innovationsgutscheine, Digital Jetzt.",
-        "branchenvergleich": "Sie liegen leicht über dem Durchschnitt der Branche.",
-        "trendreport": "2025: Sprach-KI, Agenten, Edge AI im Vormarsch.",
-        "vision": "Ihr Unternehmen als Vorreiter in kreativer KI-Nutzung."
-    }
+def gpt_generate_analysis(payload):
+    prompt = f"""
+    Du bist ein KI-Berater. Analysiere folgenden Kundenfragebogen als Grundlage für einen Executive Summary und drei Empfehlungen:
 
-# Haupt-Route
+    {payload}
+
+    Antworte in folgendem JSON Format:
+    {{
+        "executive_summary": "...",
+        "analyse": "...",
+        "empfehlung1": "...",
+        "empfehlung2": "...",
+        "empfehlung3": "...",
+        "vision": "..."
+    }}
+    """
+    response = openai.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.5
+    )
+    logger.info("✅ GPT-Antwort empfangen")
+    content = response.choices[0].message.content.strip()
+    try:
+        return eval(content)
+    except Exception as e:
+        logger.error("⚠️ Fehler beim Parsen der GPT-Antwort: %s", e)
+        return {}
+
 @app.route("/generate-pdf", methods=["POST"])
 def generate_pdf():
     try:
-        data = request.get_json()
-        logging.info("✅ Formulardaten empfangen:")
-        logging.info(data)
+        payload = request.json
+        logger.info("📥 Formulardaten empfangen:")
+        logger.info(payload)
 
-        # GPT- oder Dummy-Auswertung
-        payload = generate_dummy_payload(data)
+        preview_mode = payload.pop("preview", False)
+        template_id = PDFMONKEY_TEMPLATE_ID_PREVIEW if preview_mode else PDFMONKEY_TEMPLATE_ID
+        logger.info("📄 Verwende Template-ID: %s", template_id)
 
-        # Auswahl Template
-        is_preview = data.get("preview", False)
-        template_id = PDFMONKEY_TEMPLATE_ID_PREVIEW if is_preview else PDFMONKEY_TEMPLATE_ID
-        logging.info(f"📄 Verwende Template-ID: {template_id}")
+        # GPT-Auswertung
+        logger.info("🧠 GPT-Auswertung wird gestartet ...")
+        gpt_data = gpt_generate_analysis(payload)
+        payload.update(gpt_data)
 
-        # Sende an PDFMonkey
-        pdfmonkey_response = requests.post(
+        # PDFMonkey: PDF erzeugen
+        logger.info("📤 Sende Daten an PDFMonkey ...")
+        response = requests.post(
             "https://api.pdfmonkey.io/api/v1/documents",
             headers={
                 "Authorization": f"Bearer {PDFMONKEY_API_KEY}",
@@ -74,26 +79,30 @@ def generate_pdf():
             },
             json={
                 "document": {
-                    "document_template_id": template_id,
-                    "payload": payload,
-                    "webhook_url": MAKE_WEBHOOK_URL
+                    "template_id": template_id,
+                    "payload": payload
                 }
             }
         )
 
-        if pdfmonkey_response.status_code != 201:
-            logging.error(f"❌ Fehler bei PDFMonkey: {pdfmonkey_response.text}")
-            return jsonify({"error": "PDF-Erstellung fehlgeschlagen"}), 500
+        pdfmonkey_response = response.json()
+        document_id = pdfmonkey_response["data"]["id"]
+        logger.info("✅ PDFMonkey Dokument-ID: %s", document_id)
 
-        document_id = pdfmonkey_response.json()["data"]["id"]
-        logging.info(f"📄 PDFMonkey-Dokument ID: {document_id}")
+        preview_url = f"https://app.pdfmonkey.io/preview/{document_id}"
+        logger.info("🔗 Vorschau-Link: %s", preview_url)
 
-        return jsonify({"success": True, "preview": is_preview, "pdf_id": document_id})
+        # Trigger Make
+        logger.info("📬 Trigger Make Webhook ...")
+        if MAKE_WEBHOOK_URL:
+            requests.post(MAKE_WEBHOOK_URL, json=payload)
+
+        return jsonify({"success": True, "preview": preview_url})
 
     except Exception as e:
-        logging.exception("❌ Ausnahme beim Verarbeiten der Anfrage:")
-        return jsonify({"error": f"Interner Fehler: {str(e)}"}), 500
+        logger.error("❌ Ausnahme beim Verarbeiten der Anfrage:")
+        logger.exception(e)
+        return jsonify({"success": False, "message": str(e)}), 500
 
-# Railway-kompatibler Start
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
