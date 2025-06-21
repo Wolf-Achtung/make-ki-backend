@@ -1,126 +1,102 @@
 import os
+import json
 import logging
+import traceback
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from openai import OpenAI
+import openai
 
-# Setup
-app = Flask(__name__)
-CORS(app)
+# Logging-Setup
 logging.basicConfig(level=logging.INFO)
 
-# API-Keys aus Umgebungsvariablen
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-PDFMONKEY_API_KEY = os.getenv("PDFMONKEY_API_KEY")
-PDFMONKEY_TEMPLATE_ID = os.getenv("PDFMONKEY_TEMPLATE_ID")
-PDFMONKEY_TEMPLATE_ID_PREVIEW = os.getenv("PDFMONKEY_TEMPLATE_ID_PREVIEW")
-MAKE_WEBHOOK_URL = os.getenv("MAKE_WEBHOOK_URL")
+# Flask-Setup
+app = Flask(__name__)
+CORS(app)
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+# API-Schlüssel und IDs
+openai.api_key = os.getenv("OPENAI_API_KEY")
+pdfmonkey_api_key = os.getenv("PDFMONKEY_API_KEY")
+pdfmonkey_template_id = os.getenv("PDFMONKEY_TEMPLATE_ID_PREVIEW")
+make_webhook_url = os.getenv("MAKE_WEBHOOK_URL")
 
-def analyse_mit_gpt(daten):
-    prompt = f"""
-    Du bist ein KI-Analyst. Analysiere folgende Unternehmensdaten:
-
-    - Name: {daten.get('name')}
-    - Unternehmen: {daten.get('unternehmen')}
-    - Branche: {daten.get('branche')}
-    - Ziel KI: {daten.get('ziel_ki')}
-    - Tools: {daten.get('tools')}
-    - Herausforderung: {daten.get('herausforderung')}
-    - Geplante Maßnahmen: {daten.get('massnahmen_geplant')}
-
-    Gib zurück:
-    1. Executive Summary
-    2. Empfehlungen (3 klare Punkte)
-    3. Tool-Tipps & Roadmap
-    4. Trends & Vision
-    """
-
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=800
-        )
-        ergebnis = response.choices[0].message.content.strip()
-        logging.info("✅ GPT-Antwort erhalten.")
-        return ergebnis
-    except Exception as e:
-        logging.error(f"❌ Fehler bei GPT-Abfrage: {e}")
-        return "Fehler bei der GPT-Auswertung."
-
-def sende_an_pdfmonkey(template_id, payload):
-    try:
-        headers = {
-            "Authorization": f"Bearer {PDFMONKEY_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "document": {
-                "template_id": template_id,
-                "payload": payload
-            }
-        }
-        res = requests.post("https://api.pdfmonkey.io/api/v1/documents", headers=headers, json=data)
-        logging.info(f"📄 PDFMonkey Status {res.status_code}")
-        if res.status_code == 201:
-            return res.json()["data"]["attributes"]["download_url"]
-        else:
-            logging.warning("⚠️ PDFMonkey kein Dokument erstellt.")
-            return None
-    except Exception as e:
-        logging.error(f"❌ Fehler bei PDFMonkey: {e}")
-        return None
-
-def sende_webhook(payload):
-    try:
-        res = requests.post(MAKE_WEBHOOK_URL, json=payload)
-        logging.info(f"📡 Webhook gesendet – Status: {res.status_code}")
-        return res.status_code
-    except Exception as e:
-        logging.error(f"❌ Webhook-Fehler: {e}")
-        return 500
-
-@app.route("/generate-pdf", methods=["POST"])
+@app.route('/generate-pdf', methods=['POST'])
 def generate_pdf():
+    logging.info("📥 POST /generate-pdf gestartet")
+
     try:
         data = request.get_json()
-        logging.info("📩 Anfrage erhalten: %s", data)
+        logging.info(f"📦 Erhaltene Formulardaten:\n{json.dumps(data, indent=2)}")
 
-        if not data:
-            return jsonify({"error": "Kein JSON erhalten."}), 400
+        # Pflichtfelder prüfen
+        for field in ["name", "unternehmen", "branche"]:
+            if field not in data or not data[field]:
+                error_msg = f"❌ Fehlendes Pflichtfeld: {field}"
+                logging.error(error_msg)
+                return jsonify({"error": error_msg}), 400
 
-        gpt_resultat = analyse_mit_gpt(data)
+        # GPT-Auswertung vorbereiten
+        prompt = (
+            f"Unternehmen: {data['unternehmen']}\n"
+            f"Branche: {data['branche']}\n"
+            f"Ziel mit KI: {data.get('ziel_ki', 'Nicht angegeben')}\n"
+            f"Herausforderung: {data.get('herausforderung', 'Nicht angegeben')}\n"
+            f"Vorwissen: {data.get('verständnis', 'Unklar')}\n"
+            "Bitte erstelle eine kurze Zusammenfassung zur KI-Reife."
+        )
+        logging.info("🧠 Sende Anfrage an OpenAI ...")
 
+        completion = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "Du bist ein KI-Berater."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        zusammenfassung = completion['choices'][0]['message']['content']
+        logging.info(f"✅ GPT-Antwort erhalten:\n{zusammenfassung}")
+
+        # Vorschau-PDF generieren
         payload = {
-            "name": data.get("name"),
-            "unternehmen": data.get("unternehmen"),
-            "branche": data.get("branche"),
-            "zusammenfassung": gpt_resultat
+            "document": {
+                "payload": {
+                    "name": data["name"],
+                    "unternehmen": data["unternehmen"],
+                    "branche": data["branche"],
+                    "zusammenfassung": zusammenfassung
+                },
+                "template_id": pdfmonkey_template_id,
+                "webhook_url": make_webhook_url
+            }
         }
 
-        preview_url = sende_an_pdfmonkey(PDFMONKEY_TEMPLATE_ID_PREVIEW, payload)
-        full_url = sende_an_pdfmonkey(PDFMONKEY_TEMPLATE_ID, payload)
-        webhook_status = sende_webhook(payload)
+        headers = {
+            "Authorization": f"Bearer {pdfmonkey_api_key}",
+            "Content-Type": "application/json"
+        }
 
-        if preview_url and full_url and webhook_status in [200, 201]:
-            return jsonify({
-                "message": "✅ Auswertung erfolgreich generiert.",
-                "preview": preview_url,
-                "full": full_url
-            })
+        logging.info("📄 Erzeuge PDF über PDFMonkey ...")
+        response = requests.post(
+            "https://api.pdfmonkey.io/api/v1/documents",
+            headers=headers,
+            json=payload
+        )
+
+        if response.status_code == 201:
+            doc = response.json()
+            preview_url = doc.get("data", {}).get("attributes", {}).get("download_url", "")
+            logging.info(f"🎉 PDF-Vorschau erstellt: {preview_url}")
+            return jsonify({"preview": preview_url})
         else:
-            return jsonify({"error": "Ein Dienst hat versagt."}), 500
+            logging.error(f"❌ PDFMonkey Fehler: {response.status_code} - {response.text}")
+            return jsonify({"error": "Fehler bei PDFMonkey"}), 502
 
     except Exception as e:
-        logging.exception("❌ Fehler in /generate-pdf")
-        return jsonify({"error": str(e)}), 500
+        logging.exception("❌ Unerwarteter Fehler:")
+        return jsonify({"error": f"Fehler bei der Auswertung: {str(e)}"}), 500
 
-@app.route("/", methods=["GET"])
-def home():
-    return "✅ Backend läuft"
 
+# Railway-kompatibler Start
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
